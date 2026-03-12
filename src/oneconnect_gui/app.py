@@ -114,12 +114,6 @@ class ProfileEditWindow(Adw.Window):
             g.add(w)
         page.append(g)
 
-        # ── Authentication ──
-        g = Adw.PreferencesGroup(title="Authentication")
-        self.e_user = Adw.EntryRow(title="Username")
-        g.add(self.e_user)
-        page.append(g)
-
         # ── Advanced ──
         g = Adw.PreferencesGroup(title="Advanced")
         self.e_cert = Adw.EntryRow(title="Server certificate pin")
@@ -162,7 +156,6 @@ class ProfileEditWindow(Adw.Window):
         if profile:
             self.e_name.set_text(profile.name)
             self.e_server.set_text(profile.server_uri)
-            self.e_user.set_text(profile.username)
             self.e_cert.set_text(profile.servercert or "")
             self.e_ua.set_text(profile.useragent)
             self.e_os.set_text(profile.vpn_os)
@@ -175,7 +168,6 @@ class ProfileEditWindow(Adw.Window):
             self.sw_en.set_active(profile.av.manual_enabled)
             self.sw_up.set_active(profile.av.manual_updated)
         else:
-            self.e_user.set_text("")
             self.e_ua.set_text("OpenConnect (Clavister OneConnect VPN)")
             self.e_os.set_text("linux")
 
@@ -206,7 +198,6 @@ class ProfileEditWindow(Adw.Window):
             id=self._profile.id if self._profile else Profile().id,
             name=self.e_name.get_text().strip(),
             server_uri=self.e_server.get_text().strip(),
-            username=self.e_user.get_text().strip(),
             servercert=self.e_cert.get_text().strip() or None,
             useragent=(
                 self.e_ua.get_text().strip()
