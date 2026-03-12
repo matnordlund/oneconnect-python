@@ -8,7 +8,7 @@ import aiohttp
 
 from .configauthxml import Authenticator, ClientEnvironment, ConfigAuthXml, ConfigAuthXmlParameter
 from .envinfo import build_client_environment
-from .oidc import start_browser_oidc_flow
+from .oidc import OIDCError, start_browser_oidc_flow
 from .profiles import Profile
 
 
@@ -100,7 +100,10 @@ async def obtain_webvpn_cookie(profile: Profile, log: Optional[Callable[[str], N
             raise ClavisterAuthError("Server response did not contain discovery-endpoint/client-id")
 
         log("Starting browser OIDC flow")
-        oidc = await start_browser_oidc_flow(session, parsed.discovery_endpoint, parsed.client_id, parsed.nonce)
+        try:
+            oidc = await start_browser_oidc_flow(session, parsed.discovery_endpoint, parsed.client_id, parsed.nonce)
+        except OIDCError as exc:
+            raise ClavisterAuthError(str(exc)) from exc
 
         params = [
             ConfigAuthXmlParameter(name="id-token", value=oidc.id_token),

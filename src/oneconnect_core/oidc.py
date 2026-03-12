@@ -8,11 +8,17 @@ import html
 import os
 import socket
 import webbrowser
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import aiohttp
 from aiohttp import web
 import jwt
+from jwt import PyJWKClient
+
+
+class OIDCError(RuntimeError):
+    """Raised when OIDC discovery, token exchange, or id_token validation fails."""
+    pass
 
 
 @dataclass(slots=True)
@@ -49,10 +55,75 @@ def _find_free_port(start: int = 49215, end: int = 65535, host: str = "127.0.0.1
     raise RuntimeError("No free loopback port available")
 
 
+# Standard algorithms for OIDC id_token (JWT).
+_ID_TOKEN_ALGORITHMS = ["RS256", "ES256", "PS256"]
+
+
+def _verify_id_token_sync(
+    id_token: str,
+    jwks_uri: str,
+    issuer: str,
+    audience: str,
+    expected_nonce: str | None,
+) -> dict:
+    """Verify id_token with JWKS; raises PyJWTError on failure."""
+    client = PyJWKClient(jwks_uri, timeout=15)
+    signing_key = client.get_signing_key_from_jwt(id_token)
+    claims = jwt.decode(
+        id_token,
+        signing_key.key,
+        algorithms=_ID_TOKEN_ALGORITHMS,
+        audience=audience,
+        issuer=issuer,
+        options={"verify_aud": True, "verify_iss": True, "verify_exp": True},
+    )
+    if expected_nonce is not None and claims.get("nonce") != expected_nonce:
+        raise jwt.InvalidTokenError("nonce mismatch")
+    return claims
+
+
+async def _verify_id_token(
+    id_token: str,
+    jwks_uri: str,
+    issuer: str,
+    audience: str,
+    expected_nonce: str | None,
+) -> dict:
+    """Run sync JWKS fetch + decode in executor to avoid blocking."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: _verify_id_token_sync(
+            id_token, jwks_uri, issuer, audience, expected_nonce
+        ),
+    )
+
+
+def _require_https(url: str, name: str) -> None:
+    parsed = urlparse(url)
+    if (parsed.scheme or "").lower() != "https":
+        raise OIDCError(f"{name} must use HTTPS, got: {url}")
+
+
+def _validate_discovery_meta(meta: dict) -> None:
+    if not meta.get("jwks_uri"):
+        raise OIDCError("Discovery document missing jwks_uri")
+    if not meta.get("issuer"):
+        raise OIDCError("Discovery document missing issuer")
+    _require_https(meta["jwks_uri"], "jwks_uri")
+
+
 async def discover_provider(session: aiohttp.ClientSession, discovery_endpoint: str) -> dict:
+    _require_https(discovery_endpoint, "Discovery endpoint")
     async with session.get(discovery_endpoint.rstrip("/"), timeout=aiohttp.ClientTimeout(total=10)) as resp:
         resp.raise_for_status()
-        return await resp.json()
+        meta = await resp.json()
+    _validate_discovery_meta(meta)
+    return meta
+
+
+# Max time to wait for user to complete browser OIDC flow (seconds).
+_OIDC_BROWSER_TIMEOUT = 600
 
 
 async def start_browser_oidc_flow(session: aiohttp.ClientSession, discovery_endpoint: str, client_id: str, nonce: str | None = None) -> OIDCResult:
@@ -116,20 +187,32 @@ async def start_browser_oidc_flow(session: aiohttp.ClientSession, discovery_endp
                     tok = await resp.json()
                     id_token = tok.get("id_token") or ""
                     refresh_token = tok.get("refresh_token")
-                    clavister_url = None
-                    try:
-                        claims = jwt.decode(id_token, options={"verify_signature": False, "verify_aud": False})
-                        clavister_url = claims.get("clavister_url")
-                    except jwt.PyJWTError:
-                        pass
-                    result_holder.update({
-                        "id_token": id_token,
-                        "refresh_token": refresh_token,
-                        "clavister_url": clavister_url,
-                    })
-                    if clavister_url:
-                        meta_refresh = f"http-equiv='refresh' content='1;url={clavister_url}'"
-                        html_msg = "Your single sign-on portal is being prepared."
+                    if not id_token:
+                        result_holder["error"] = "Token response missing id_token"
+                        status = 400
+                        html_msg = "Token response missing id_token."
+                    else:
+                        try:
+                            claims = await _verify_id_token(
+                                id_token,
+                                jwks_uri=meta["jwks_uri"],
+                                issuer=meta["issuer"],
+                                audience=client_id,
+                                expected_nonce=nonce.strip() if nonce and nonce.strip() else None,
+                            )
+                            clavister_url = claims.get("clavister_url")
+                            result_holder.update({
+                                "id_token": id_token,
+                                "refresh_token": refresh_token,
+                                "clavister_url": clavister_url,
+                            })
+                            if clavister_url:
+                                meta_refresh = f"http-equiv='refresh' content='1;url={clavister_url}'"
+                                html_msg = "Your single sign-on portal is being prepared."
+                        except jwt.PyJWTError as e:
+                            result_holder["error"] = f"Invalid id_token: {e}"
+                            status = 400
+                            html_msg = "Token validation failed."
 
         html_response = (
             f"<html><head><meta {meta_refresh}></head><body style='font-family:sans-serif'>"
@@ -144,16 +227,23 @@ async def start_browser_oidc_flow(session: aiohttp.ClientSession, discovery_endp
     site = web.TCPSite(runner, host=host, port=port)
     await site.start()
 
-    try:
+    async def wait_for_result() -> None:
         webbrowser.open(auth_endpoint + "?" + urlencode(params))
         while not result_holder:
             await asyncio.sleep(0.05)
+
+    try:
+        await asyncio.wait_for(wait_for_result(), timeout=_OIDC_BROWSER_TIMEOUT)
         if "error" in result_holder:
-            raise RuntimeError(result_holder["error"])
+            raise OIDCError(result_holder["error"])
         return OIDCResult(
             id_token=result_holder["id_token"],
             refresh_token=result_holder.get("refresh_token"),
             url=result_holder.get("clavister_url"),
         )
+    except asyncio.TimeoutError:
+        raise OIDCError(
+            "Browser sign-in did not complete in time. Please try again."
+        ) from None
     finally:
         await runner.cleanup()
