@@ -406,7 +406,18 @@ class MainWindow(Adw.ApplicationWindow):
         def _do():
             end = self.log_buffer.get_end_iter()
             self.log_buffer.insert(end, text + "\n")
-            mark = self.log_buffer.create_mark(None, self.log_buffer.get_end_iter(), False)
+            # Heuristics: when OpenConnect reports a stable tunnel, mark as connected.
+            lower = text.lower()
+            if (
+                "connected to" in lower
+                or "connected as" in lower
+                or "dtls connection established" in lower
+                or "esp session established" in lower
+            ):
+                self.set_status("connected")
+            mark = self.log_buffer.create_mark(
+                None, self.log_buffer.get_end_iter(), False
+            )
             self.log_view.scroll_to_mark(mark, 0, False, 0, 0)
         GLib.idle_add(_do)
 

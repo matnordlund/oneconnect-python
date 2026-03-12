@@ -145,6 +145,8 @@ async def run_openconnect(
     if proc_holder is not None:
         try:
             proc_holder.current_proc = proc
+            # Expose the root PID so UIs can disconnect reliably later.
+            proc_holder.root_pid = proc.pid
         except Exception:
             pass
 

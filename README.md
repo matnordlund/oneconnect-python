@@ -53,8 +53,6 @@ Profiles are stored in:
 Each profile supports:
 
 - NetWall server URI
-- optional OpenConnect server override
-- username and device seed
 - optional server certificate pin
 - OpenConnect user-agent and `--os`
 - extra OpenConnect arguments
@@ -94,13 +92,15 @@ The script is expected to return exit code `0` on success.
 
 The GTK UI includes:
 
-- profile picker
-- add / edit / delete
-- AV mode selection
-- AV script path field
-- advanced OpenConnect fields
-- connect / disconnect
-- log output pane
+- profile picker sidebar with libadwaita navigation styling
+- add / edit / delete profiles
+- modern profile editor using `Adw.PreferencesGroup` and `Adw.EntryRow`
+- AV mode selection (`auto`, `script`, `manual`) and AV script path field
+- advanced OpenConnect fields (server certificate pin, user-agent, OS, extra args)
+- status pill that reflects Disconnected / Authenticating / Connecting / Connected / Error
+- connect / disconnect with reliable pkexec-based process handling
+- log output pane with auto-scroll and a Clear button
+- toast notifications for profile actions and errors
 
 ## CLI examples
 
