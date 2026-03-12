@@ -180,7 +180,7 @@ class ProfileEditWindow(Adw.Window):
             self.sw_en.set_active(profile.av.manual_enabled)
             self.sw_up.set_active(profile.av.manual_updated)
         else:
-            self.e_user.set_text("user")
+            self.e_user.set_text("")
             self.e_seed.set_text("linux-device")
             self.e_ua.set_text("OpenConnect (Clavister OneConnect VPN)")
             self.e_os.set_text("linux")
@@ -268,7 +268,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(self.toast_overlay)
 
         # ── Sidebar ──────────────────────────────────────────────────────
-        sb_header = Adw.HeaderBar()
+        sb_header = Adw.HeaderBar(
+            show_start_title_buttons=False,
+            show_end_title_buttons=False,
+        )
         sb_header.set_title_widget(
             Gtk.Label(label="Profiles", css_classes=["heading"])
         )
@@ -317,7 +320,7 @@ class MainWindow(Adw.ApplicationWindow):
         ct_header.pack_start(self.disconnect_btn)
 
         edit_hb_btn = Gtk.Button(
-            icon_name="document-edit-symbolic",
+            icon_name="document-properties-symbolic",
             tooltip_text="Edit profile",
             css_classes=["flat"],
         )
