@@ -110,26 +110,23 @@ class ProfileEditWindow(Adw.Window):
         g = Adw.PreferencesGroup(title="Server")
         self.e_name = Adw.EntryRow(title="Profile name")
         self.e_server = Adw.EntryRow(title="NetWall server URI")
-        self.e_oc = Adw.EntryRow(title="OpenConnect server override")
-        for w in (self.e_name, self.e_server, self.e_oc):
+        for w in (self.e_name, self.e_server):
             g.add(w)
         page.append(g)
 
         # ── Authentication ──
         g = Adw.PreferencesGroup(title="Authentication")
         self.e_user = Adw.EntryRow(title="Username")
-        self.e_seed = Adw.EntryRow(title="Device seed")
-        self.e_cert = Adw.EntryRow(title="Server certificate pin")
-        for w in (self.e_user, self.e_seed, self.e_cert):
-            g.add(w)
+        g.add(self.e_user)
         page.append(g)
 
         # ── Advanced ──
         g = Adw.PreferencesGroup(title="Advanced")
+        self.e_cert = Adw.EntryRow(title="Server certificate pin")
         self.e_ua = Adw.EntryRow(title="User-Agent")
         self.e_os = Adw.EntryRow(title="VPN OS")
         self.e_extra = Adw.EntryRow(title="Extra OpenConnect arguments")
-        for w in (self.e_ua, self.e_os, self.e_extra):
+        for w in (self.e_cert, self.e_ua, self.e_os, self.e_extra):
             g.add(w)
         page.append(g)
 
@@ -165,9 +162,7 @@ class ProfileEditWindow(Adw.Window):
         if profile:
             self.e_name.set_text(profile.name)
             self.e_server.set_text(profile.server_uri)
-            self.e_oc.set_text(profile.openconnect_server or "")
             self.e_user.set_text(profile.username)
-            self.e_seed.set_text(profile.device_seed)
             self.e_cert.set_text(profile.servercert or "")
             self.e_ua.set_text(profile.useragent)
             self.e_os.set_text(profile.vpn_os)
@@ -181,7 +176,6 @@ class ProfileEditWindow(Adw.Window):
             self.sw_up.set_active(profile.av.manual_updated)
         else:
             self.e_user.set_text("")
-            self.e_seed.set_text("linux-device")
             self.e_ua.set_text("OpenConnect (Clavister OneConnect VPN)")
             self.e_os.set_text("linux")
 
@@ -212,9 +206,7 @@ class ProfileEditWindow(Adw.Window):
             id=self._profile.id if self._profile else Profile().id,
             name=self.e_name.get_text().strip(),
             server_uri=self.e_server.get_text().strip(),
-            openconnect_server=self.e_oc.get_text().strip() or None,
-            username=self.e_user.get_text().strip() or "user",
-            device_seed=self.e_seed.get_text().strip() or "linux-device",
+            username=self.e_user.get_text().strip(),
             servercert=self.e_cert.get_text().strip() or None,
             useragent=(
                 self.e_ua.get_text().strip()
