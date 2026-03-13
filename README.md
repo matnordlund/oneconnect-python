@@ -7,7 +7,7 @@ Clavister NetWall OIDC + OpenConnect helper with a reusable core and GTK4 UI for
 **From source using a virtual environment** (recommended on managed Linux, e.g. Debian/Ubuntu, where system Python is externally managed):
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/oneconnect-python.git
+git clone https://github.com/matnordlund/oneconnect-python.git
 cd oneconnect-python
 python3 -m venv .venv
 source .venv/bin/activate
@@ -24,7 +24,7 @@ To leave the venv: `deactivate`. To use the app again later: `cd oneconnect-pyth
 **From source without venv** (when your system allows it):
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/oneconnect-python.git
+git clone https://github.com/matnordlund/oneconnect-python.git
 cd oneconnect-python
 pip install -e .
 ```
@@ -176,7 +176,7 @@ oneconnect connect Demo --nm
 oneconnect disconnect Demo --nm
 ```
 
-**If you see "No valid secrets":** On failure, the passwd-file path is logged so you can inspect it (e.g. `cat /tmp/tmpXXXX.txt`). For more detail from NetworkManager, run with `NM_DEBUG=debug` (e.g. `NM_DEBUG=debug oneconnect connect Demo --nm`) and check `journalctl -u NetworkManager` or the NM log.
+**If you see "No valid secrets":** (1) On failure, the passwd-file path is logged—inspect it with `cat /tmp/tmpXXXX.txt`. (2) See which secrets the plugin expects by running `nmcli connection up oneconnect-<name> --ask` and noting the prompt labels (Cookie, Gateway, etc.). (3) For more detail, run with `NM_DEBUG=debug` and check `journalctl -u NetworkManager`.
 
 ## Dependencies
 

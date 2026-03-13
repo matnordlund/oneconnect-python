@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -151,9 +152,9 @@ async def activate_nm_connection(
     con_id = await ensure_nm_connection(profile, log=log)
     gateway = _gateway_from_profile(profile)
 
-    # Passwd-file must be "<setting>.<property>:<secret>" per line (nmcli requirement).
-    # NM 1.12+ uses vpn.secret.* (singular); older uses vpn.secrets.*. Supply both.
-    # gwcert can be empty when gwcert-flags=4 (not required); some plugins still expect the key.
+    # Strategy 1: passwd-file (preferred; no secrets written to connection file).
+    # Strategy 2: set secrets via modify, then up, then clear (works when passwd-file is broken).
+    passwd_path = None
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".txt",
@@ -165,25 +166,53 @@ async def activate_nm_connection(
         f.write(f"vpn.secret.gwcert:\n")
         f.write(f"vpn.secrets.cookie:{cookie}\n")
         f.write(f"vpn.secrets.gateway:{gateway}\n")
+        f.write(f"vpn.secrets.password:{cookie}\n")
         f.write("vpn.secrets.gwcert:\n")
-        path = f.name
+        f.flush()
+        os.fsync(f.fileno())
+        passwd_path = f.name
 
     rc = -1
     try:
-        log(f"Activating NM connection {con_id} (passwd-file: {path})")
+        log(f"Activating NM connection {con_id} (passwd-file: {passwd_path})")
         rc, out, err = await _run_nmcli(
             "connection", "up", con_id,
-            "passwd-file", path,
+            "passwd-file", passwd_path,
             log=log,
         )
+        if rc == 0:
+            return 0
+        if "No valid secrets" not in err:
+            log(f"nmcli up failed: {err}")
+            log(f"Passwd-file kept for debugging: {passwd_path}")
+            return rc
+        # Fallback: set secrets on connection, up, then clear (avoids passwd-file parsing bugs).
+        log("Passwd-file not accepted, trying modify-then-up fallback")
+        try:
+            Path(passwd_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        passwd_path = None
+        # Set secrets (cookie, gateway; gwcert empty when gwcert-flags=4).
+        await _run_nmcli(
+            "connection", "modify", con_id,
+            "vpn.secrets", f"cookie={cookie}", f"gateway={gateway}", "gwcert=",
+            log=log,
+        )
+        rc, out, err = await _run_nmcli("connection", "up", con_id, log=log)
         if rc != 0:
             log(f"nmcli up failed: {err}")
-            log(f"Passwd-file kept for debugging: {path}")
+        # Clear secrets from connection file so cookie is not stored.
+        await _run_nmcli(
+            "connection", "modify", con_id,
+            "vpn.secrets", "cookie=", "gateway=", "gwcert=",
+            log=log,
+        )
         return rc
     finally:
-        if rc == 0:
+        if passwd_path and rc == 0:
             try:
-                Path(path).unlink(missing_ok=True)
+                Path(passwd_path).unlink(missing_ok=True)
             except OSError:
                 pass
 
