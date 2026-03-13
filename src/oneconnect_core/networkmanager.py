@@ -149,16 +149,15 @@ async def activate_nm_connection(
     con_id = await ensure_nm_connection(profile, log=log)
     gateway = _gateway_from_profile(profile)
 
-    # Passwd-file: keyfile format [vpn-secrets] with cookie= and gateway= (NM keyfile plugin).
+    # Passwd-file must be "<setting>.<property>:<secret>" per line (nmcli requirement).
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".txt",
         delete=False,
         delete_on_close=False,
     ) as f:
-        f.write("[vpn-secrets]\n")
-        f.write(f"cookie={cookie}\n")
-        f.write(f"gateway={gateway}\n")
+        f.write(f"vpn.secrets.cookie:{cookie}\n")
+        f.write(f"vpn.secrets.gateway:{gateway}\n")
         path = f.name
 
     try:
