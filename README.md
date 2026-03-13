@@ -4,18 +4,30 @@ Clavister NetWall OIDC + OpenConnect helper with a reusable core and GTK4 UI for
 
 ## Installation
 
-**From source (recommended for development):**
+**From source using a virtual environment** (recommended on managed Linux, e.g. Debian/Ubuntu, where system Python is externally managed):
+
+```bash
+git clone https://github.com/YOUR_USERNAME/oneconnect-python.git
+cd oneconnect-python
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Then run the CLI or GUI with the venv active:
+
+- `oneconnect` — CLI (list, add-profile, connect, disconnect)
+- `oneconnect-gui` — GTK profile picker and connection UI
+
+To leave the venv: `deactivate`. To use the app again later: `cd oneconnect-python && source .venv/bin/activate`, then `oneconnect` or `oneconnect-gui`.
+
+**From source without venv** (when your system allows it):
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/oneconnect-python.git
 cd oneconnect-python
 pip install -e .
 ```
-
-After install you can run:
-
-- `oneconnect` — CLI (list, add-profile, connect, disconnect)
-- `oneconnect-gui` — GTK profile picker and connection UI
 
 **Run without installing** (from repo root):
 
