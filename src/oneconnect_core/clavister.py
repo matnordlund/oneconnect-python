@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import asyncio
+import hashlib
 import os
+import socket
+import ssl
 from typing import Callable, Optional
 
 import aiohttp
@@ -10,6 +14,7 @@ from .configauthxml import Authenticator, ClientEnvironment, ConfigAuthXml, Conf
 from .envinfo import build_client_environment
 from .oidc import OIDCError, start_browser_oidc_flow
 from .profiles import Profile
+from urllib.parse import urlparse
 
 
 @dataclass(slots=True)
@@ -29,6 +34,15 @@ class TunnelConfiguration:
 
 class ClavisterAuthError(RuntimeError):
     pass
+
+
+@dataclass(slots=True)
+class SessionSecrets:
+    """Per-session secrets needed by backends (direct openconnect or NetworkManager)."""
+
+    cookie: str
+    connect_url: str
+    fingerprint: str
 
 
 def _x_pad_value(body_bytes: bytes) -> str:
@@ -54,6 +68,35 @@ def build_request_headers(client_env: ClientEnvironment, tunnel_cfg: TunnelConfi
     }
 
 
+async def _probe_gateway_fingerprint(connect_url: str, log: Callable[[str], None]) -> str:
+    """
+    Perform a minimal TLS handshake against the VPN gateway to obtain the
+    server certificate fingerprint in a format suitable for NM-openconnect
+    gwcert / openconnect --servercert.
+    """
+    parsed = urlparse(connect_url)
+    host = parsed.hostname
+    if not host:
+        raise ClavisterAuthError(f"Invalid connect URL for fingerprint probe: {connect_url}")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    def _sync_probe() -> str:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, port), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                der = ssock.getpeercert(binary_form=True)
+        sha1 = hashlib.sha1(der).hexdigest().upper()
+        return ":".join(sha1[i:i + 2] for i in range(0, len(sha1), 2))
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, _sync_probe)
+    except Exception as exc:
+        log(f"Warning: failed to probe gateway certificate fingerprint: {exc}")
+        # Empty fingerprint forces callers to either fall back or omit gwcert.
+        return ""
+
+
 async def _post_config_auth(
     session: aiohttp.ClientSession,
     auth_uri: str,
@@ -72,7 +115,18 @@ async def _post_config_auth(
         return await resp.text()
 
 
-async def obtain_webvpn_cookie(profile: Profile, log: Optional[Callable[[str], None]] = None) -> str:
+async def obtain_webvpn_secrets(
+    profile: Profile,
+    log: Optional[Callable[[str], None]] = None,
+) -> SessionSecrets:
+    """
+    Perform the full OIDC + NetWall bootstrap, then derive the per-session
+    secrets needed by both backends:
+
+    - cookie: webvpn=...
+    - connect_url: final AnyConnect tunnel URL
+    - fingerprint: TLS server certificate fingerprint for the gateway
+    """
     log = log or (lambda msg: None)
     server_uri = profile.server_uri.rstrip("/")
     auth_uri = f"{server_uri}/auth"
@@ -129,4 +183,28 @@ async def obtain_webvpn_cookie(profile: Profile, log: Optional[Callable[[str], N
         async with session.request("CONNECT", connect_uri, headers=headers, timeout=aiohttp.ClientTimeout(total=15)):
             pass
 
-        return f"webvpn={token_reply.session_token}"
+        cookie = f"webvpn={token_reply.session_token}"
+
+        # For now, treat the known tunnel endpoint as the connect URL; if the
+        # gateway starts redirecting, this helper can be extended to follow
+        # redirects and capture the final URL.
+        connect_url = connect_uri
+        fingerprint = await _probe_gateway_fingerprint(connect_url, log)
+
+        return SessionSecrets(
+            cookie=cookie,
+            connect_url=connect_url,
+            fingerprint=fingerprint,
+        )
+
+
+async def obtain_webvpn_cookie(profile: Profile, log: Optional[Callable[[str], None]] = None) -> str:
+    """
+    Backwards-compatible wrapper that only returns the webvpn cookie.
+
+    New code should use obtain_webvpn_secrets() to also get the connect URL
+    and gateway certificate fingerprint.
+    """
+    secrets = await obtain_webvpn_secrets(profile, log=log)
+    return secrets.cookie
+
