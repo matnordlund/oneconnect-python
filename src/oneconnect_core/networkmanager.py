@@ -197,6 +197,9 @@ async def activate_nm_connection(
         log(f"nmcli modify vpn.secrets failed: {err_mod}")
         return rc_mod
 
+    # Reload so activation sees the updated secrets (required after modify).
+    await _run_nmcli("connection", "reload", log=log)
+
     rc = -1
     try:
         log(f"Activating NM connection {con_id}")
