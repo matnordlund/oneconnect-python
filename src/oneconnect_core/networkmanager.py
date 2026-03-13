@@ -164,7 +164,8 @@ async def activate_nm_connection(
     # #endregion
 
     # The NM openconnect plugin maps vpn.secrets.gwcert → --servercert.
-    # Use profile.servercert if available (same as direct runner).
+    # Use profile.servercert when set; otherwise provide empty gwcert so the plugin
+    # gets all three keys (avoids "failed to provide sufficient secrets" on final request).
     gwcert = profile.servercert or ""
 
     # #region agent log — H-I/H-J: log gwcert and profile details
@@ -183,12 +184,12 @@ async def activate_nm_connection(
         delete=False,
         delete_on_close=False,
     ) as f:
+        # Always provide all three keys; gwcert empty when no cert pin (gwcert-flags=4).
         lines = [
             f"vpn.secrets.cookie:{cookie}",
             f"vpn.secrets.gateway:{gateway}",
+            f"vpn.secrets.gwcert:{gwcert}",
         ]
-        if gwcert:
-            lines.append(f"vpn.secrets.gwcert:{gwcert}")
         content = "\n".join(lines) + "\n"
         f.write(content)
         # #region agent log — H-I: log passwd-file keys
