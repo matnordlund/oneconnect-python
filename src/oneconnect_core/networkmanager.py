@@ -2,14 +2,26 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import os
 import re
 import tempfile
+import time as _time
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
 from .profiles import Profile
+
+# #region agent log
+_DBG_LOG = Path("/Users/mattias/src/oneconnect-python/.cursor/debug-5d8d44.log")
+def _dbg(hypothesis: str, location: str, message: str, data: dict | None = None) -> None:
+    try:
+        with open(_DBG_LOG, "a") as _f:
+            _f.write(_json.dumps({"sessionId": "5d8d44", "hypothesisId": hypothesis, "location": f"networkmanager.py:{location}", "message": message, "data": data or {}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 
 CONNECTION_ID_PREFIX = "oneconnect-"
@@ -152,8 +164,14 @@ async def activate_nm_connection(
     con_id = await ensure_nm_connection(profile, log=log)
     gateway = _gateway_from_profile(profile)
 
-    # Strategy 1: passwd-file (preferred; no secrets written to connection file).
-    # Strategy 2: set secrets via modify, then up, then clear (works when passwd-file is broken).
+    # #region agent log — H-C/H-D: dump connection profile to see actual vpn.data
+    _rc_dump, dump_out, _ = await _run_nmcli("connection", "show", con_id, log=lambda _: None)
+    vpn_data_lines = [l for l in dump_out.splitlines() if "vpn.data" in l.lower() or "vpn.secret" in l.lower() or "vpn.service" in l.lower()]
+    _dbg("H-C", "activate:dump", "connection profile vpn fields after ensure", {"lines": vpn_data_lines})
+    # #endregion
+
+    # Strategy 1: passwd-file with only vpn.secrets.* (plural) keys.
+    # Strategy 2: set secrets via modify, then up, then clear.
     passwd_path = None
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -161,13 +179,16 @@ async def activate_nm_connection(
         delete=False,
         delete_on_close=False,
     ) as f:
-        f.write(f"vpn.secret.cookie:{cookie}\n")
-        f.write(f"vpn.secret.gateway:{gateway}\n")
-        f.write(f"vpn.secret.gwcert:\n")
-        f.write(f"vpn.secrets.cookie:{cookie}\n")
-        f.write(f"vpn.secrets.gateway:{gateway}\n")
-        f.write(f"vpn.secrets.password:{cookie}\n")
-        f.write("vpn.secrets.gwcert:\n")
+        # #region agent log — H-A: write only vpn.secrets.* (plural) to test singular rejection
+        lines = [
+            f"vpn.secrets.cookie:{cookie}",
+            f"vpn.secrets.gateway:{gateway}",
+            f"vpn.secrets.gwcert:(null)",
+        ]
+        content = "\n".join(lines) + "\n"
+        f.write(content)
+        _dbg("H-A", "activate:passwd", "passwd-file content (keys only)", {"keys": [l.split(":")[0] for l in lines], "num_lines": len(lines)})
+        # #endregion
         f.flush()
         os.fsync(f.fileno())
         passwd_path = f.name
@@ -180,32 +201,42 @@ async def activate_nm_connection(
             "passwd-file", passwd_path,
             log=log,
         )
+        # #region agent log — H-A/H-B: log passwd-file result
+        _dbg("H-A", "activate:passwd_result", "passwd-file attempt result", {"rc": rc, "err": err.strip()})
+        # #endregion
         if rc == 0:
             return 0
         if "No valid secrets" not in err:
             log(f"nmcli up failed: {err}")
             log(f"Passwd-file kept for debugging: {passwd_path}")
             return rc
-        # Fallback: set secrets on connection, up, then clear (avoids passwd-file parsing bugs).
+        # Fallback: set secrets on connection via modify, then up, then clear.
         log("Passwd-file not accepted, trying modify-then-up fallback")
         try:
             Path(passwd_path).unlink(missing_ok=True)
         except OSError:
             pass
         passwd_path = None
-        # Set secrets (cookie, gateway; gwcert empty when gwcert-flags=4).
-        await _run_nmcli(
+        # nmcli expects all vpn.secrets as a single comma-separated value string.
+        secrets_str = f"cookie={cookie},gateway={gateway},gwcert=(null)"
+        rc_mod, _, err_mod = await _run_nmcli(
             "connection", "modify", con_id,
-            "vpn.secrets", f"cookie={cookie}", f"gateway={gateway}", "gwcert=",
+            "vpn.secrets", secrets_str,
             log=log,
         )
+        # #region agent log — H-E: log modify secrets result
+        _dbg("H-E", "activate:modify_secrets", "modify vpn.secrets result", {"rc": rc_mod, "err": err_mod.strip(), "secrets_str_keys": "cookie,gateway,gwcert"})
+        # #endregion
         rc, out, err = await _run_nmcli("connection", "up", con_id, log=log)
+        # #region agent log — H-E: log fallback up result
+        _dbg("H-E", "activate:fallback_up", "fallback connection up result", {"rc": rc, "err": err.strip()})
+        # #endregion
         if rc != 0:
             log(f"nmcli up failed: {err}")
         # Clear secrets from connection file so cookie is not stored.
         await _run_nmcli(
             "connection", "modify", con_id,
-            "vpn.secrets", "cookie=", "gateway=", "gwcert=",
+            "vpn.secrets", "cookie=,gateway=,gwcert=",
             log=log,
         )
         return rc
