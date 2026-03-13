@@ -22,7 +22,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from oneconnect_core.clavister import obtain_webvpn_cookie
+from oneconnect_core.clavister import obtain_webvpn_cookie, obtain_webvpn_secrets, SessionSecrets
 from oneconnect_core.config import get_use_networkmanager, set_use_networkmanager
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
 from oneconnect_core.runner import get_backend
@@ -565,12 +565,16 @@ class MainWindow(Adw.ApplicationWindow):
             async def run() -> None:
                 try:
                     self.set_status("authenticating")
-                    cookie = await obtain_webvpn_cookie(profile, log=self.append_log)
-                    self.append_log("Received session cookie, launching OpenConnect")
+                    secrets: SessionSecrets = await obtain_webvpn_secrets(profile, log=self.append_log)
+                    self.append_log("Received session secrets, launching OpenConnect")
+                    backend_local = backend
+                    if use_nm and not secrets.fingerprint:
+                        self.append_log("NetworkManager backend missing gateway fingerprint; falling back to direct openconnect.")
+                        backend_local = get_backend(use_networkmanager=False, use_pkexec=True)
                     self.set_status("connecting")
-                    rc = await backend.connect(
+                    rc = await backend_local.connect(
                         profile,
-                        cookie,
+                        secrets,
                         log=self.append_log,
                         proc_holder=self,
                     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Protocol
 
 from .profiles import Profile
+from .clavister import SessionSecrets
 
 
 class ConnectionBackend(Protocol):
@@ -12,7 +13,7 @@ class ConnectionBackend(Protocol):
     async def connect(
         self,
         profile: Profile,
-        cookie: str,
+        secrets: SessionSecrets,
         log: Optional[Callable[[str], None]] = None,
         proc_holder: object | None = None,
     ) -> int:
@@ -38,14 +39,14 @@ class DirectBackend:
     async def connect(
         self,
         profile: Profile,
-        cookie: str,
+        secrets: SessionSecrets,
         log: Optional[Callable[[str], None]] = None,
         proc_holder: object | None = None,
     ) -> int:
         from .openconnect_runner import run_openconnect
         return await run_openconnect(
             profile,
-            cookie,
+            secrets.cookie,
             log=log,
             use_pkexec=self.use_pkexec,
             proc_holder=proc_holder,
@@ -72,12 +73,12 @@ class NetworkManagerBackend:
     async def connect(
         self,
         profile: Profile,
-        cookie: str,
+        secrets: SessionSecrets,
         log: Optional[Callable[[str], None]] = None,
         proc_holder: object | None = None,
     ) -> int:
         from .networkmanager import activate_nm_connection
-        return await activate_nm_connection(profile, cookie, log=log)
+        return await activate_nm_connection(profile, secrets, log=log)
 
     async def disconnect(
         self,

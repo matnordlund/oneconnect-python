@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from urllib.parse import urlparse
 
 from .profiles import Profile
+from .clavister import SessionSecrets
 
 # #region agent log
 _DBG_LOG = Path(tempfile.gettempdir()) / "oneconnect-debug-5d8d44.log"
@@ -151,7 +152,7 @@ async def ensure_nm_connection(
 
 async def activate_nm_connection(
     profile: Profile,
-    cookie: str,
+    secrets: SessionSecrets,
     log: Optional[Callable[[str], None]] = None,
 ) -> int:
     """
@@ -161,6 +162,9 @@ async def activate_nm_connection(
     """
     con_id = await ensure_nm_connection(profile, log=log)
     gateway = _gateway_from_profile(profile)
+    cookie = secrets.cookie
+    connect_url = secrets.connect_url
+    gwcert = secrets.fingerprint
 
     # #region agent log — H-C/H-D: dump connection profile to see actual vpn.data
     _rc_dump, dump_out, _ = await _run_nmcli("connection", "show", con_id, log=lambda _: None)
@@ -168,80 +172,54 @@ async def activate_nm_connection(
     _dbg("H-C", "activate:dump", "connection profile vpn fields after ensure", {"lines": vpn_data_lines})
     # #endregion
 
-    # The NM openconnect plugin maps vpn.secrets.gwcert → --servercert.
-    gwcert = profile.servercert or ""
-
     # #region agent log
     _dbg("H-I", "activate:secrets_info", "secrets being prepared", {
         "gateway": gateway,
-        "has_servercert": bool(profile.servercert),
+        "connect_url": connect_url,
+        "gwcert": gwcert,
         "cookie_prefix": cookie[:20] if cookie else "",
     })
     # #endregion
 
-    # Strategy: passwd-file with pkexec so the secret agent runs as root (avoids agent
-    # "final secrets request failed to provide sufficient secrets" when run as user).
-    passwd_path = None
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".txt",
-        delete=False,
-        delete_on_close=False,
-    ) as f:
-        f.write(f"vpn.secrets.cookie:{cookie}\n")
-        f.write(f"vpn.secrets.gateway:{gateway}\n")
-        f.write(f"vpn.secrets.gwcert:{gwcert}\n")
-        f.flush()
-        os.fsync(f.fileno())
-        passwd_path = f.name
+    # Store secrets directly on the connection; NM-openconnect expects:
+    #   vpn.secrets.cookie   -> cookie
+    #   vpn.secrets.gateway  -> final CONNECT_URL
+    #   vpn.secrets.gwcert   -> server certificate fingerprint
+    # We set flags=0 in vpn.data so NM reads them from the connection profile.
+    vpn_data_stored = f"gateway={gateway},protocol=anyconnect,cookie-flags=0,gateway-flags=0,gwcert-flags=0"
+    if profile.servercert:
+        vpn_data_stored += f",servercert={profile.servercert}"
+    await _run_nmcli("connection", "modify", con_id, "vpn.data", vpn_data_stored, log=log)
 
-    pkexec_bin = _find_pkexec()
+    secrets_str = f"cookie={cookie},gateway={connect_url}"
+    if gwcert:
+        secrets_str += f",gwcert={gwcert}"
+    rc_mod, _, err_mod = await _run_nmcli(
+        "connection", "modify", con_id,
+        "vpn.secrets", secrets_str,
+        log=log,
+    )
+    _dbg("H-I", "activate:modify_secrets", "modify vpn.secrets", {"rc": rc_mod, "err": err_mod.strip()})
+    if rc_mod != 0:
+        log(f"nmcli modify vpn.secrets failed: {err_mod}")
+        return rc_mod
+
     rc = -1
     try:
-        if pkexec_bin:
-            log(f"Activating NM connection {con_id} (passwd-file via pkexec)")
-            cmd = [pkexec_bin, _find_nmcli(), "connection", "up", con_id, "passwd-file", passwd_path]
-            log(f"Running: {' '.join(cmd)}")
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, err = await proc.communicate()
-            rc, out_s, err_s = proc.returncode, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
-            if rc != 0:
-                log(f"nmcli stderr: {err_s}")
-            _dbg("H-I", "activate:up_result", "connection up (pkexec)", {"rc": rc, "err": err_s.strip()})
-        else:
-            log("pkexec not found, trying modify-then-up")
-            vpn_data_stored = f"gateway={gateway},protocol=anyconnect,cookie-flags=0,gateway-flags=0,gwcert-flags=4"
-            if profile.servercert:
-                vpn_data_stored += f",servercert={profile.servercert}"
-            await _run_nmcli("connection", "modify", con_id, "vpn.data", vpn_data_stored, log=log)
-            secrets_str = f"cookie={cookie},gateway={gateway}"
-            if gwcert:
-                secrets_str += f",gwcert={gwcert}"
-            await _run_nmcli("connection", "modify", con_id, "vpn.secrets", secrets_str, log=log)
-            log(f"Activating NM connection {con_id}")
-            rc, out, err = await _run_nmcli("connection", "up", con_id, log=log)
-            _dbg("H-I", "activate:up_result", "connection up (modify)", {"rc": rc, "err": err.strip()})
-            if rc != 0:
-                log(f"nmcli up failed: {err}")
-            # Clear secrets and restore flags
-            await _run_nmcli("connection", "modify", con_id, "vpn.secrets", "cookie=,gateway=,gwcert=", log=log)
-            vpn_data_agent = f"gateway={gateway},protocol=anyconnect,cookie-flags=2,gateway-flags=2,gwcert-flags=4"
-            if profile.servercert:
-                vpn_data_agent += f",servercert={profile.servercert}"
-            await _run_nmcli("connection", "modify", con_id, "vpn.data", vpn_data_agent, log=log)
+        log(f"Activating NM connection {con_id}")
+        rc, out, err = await _run_nmcli("connection", "up", con_id, log=log)
+        _dbg("H-I", "activate:up_result", "connection up", {"rc": rc, "err": err.strip()})
+        if rc != 0:
+            log(f"nmcli up failed: {err}")
         return rc
     finally:
-        if passwd_path and rc == 0:
-            try:
-                Path(passwd_path).unlink(missing_ok=True)
-            except OSError:
-                pass
-        elif passwd_path and rc != 0:
-            log(f"Passwd-file kept for debugging: {passwd_path}")
+        # Clear secrets from the connection to avoid keeping the cookie on disk.
+        await _run_nmcli("connection", "modify", con_id, "vpn.secrets", "cookie=,gateway=,gwcert=", log=log)
+        # Restore flags so future connections can use agents/passwd-file if desired.
+        vpn_data_agent = f"gateway={gateway},protocol=anyconnect,cookie-flags=2,gateway-flags=2,gwcert-flags=4"
+        if profile.servercert:
+            vpn_data_agent += f",servercert={profile.servercert}"
+        await _run_nmcli("connection", "modify", con_id, "vpn.data", vpn_data_agent, log=log)
 
 
 async def deactivate_nm_connection(

@@ -5,7 +5,7 @@ import argparse
 import asyncio
 import json
 
-from oneconnect_core.clavister import obtain_webvpn_cookie
+from oneconnect_core.clavister import obtain_webvpn_cookie, obtain_webvpn_secrets, SessionSecrets
 from oneconnect_core.config import get_use_networkmanager
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
 from oneconnect_core.runner import get_backend
@@ -78,11 +78,16 @@ def main() -> None:
         if not profile:
             raise SystemExit(f"Profile not found: {args.name}")
         use_nm = args.use_nm if args.use_nm is not None else get_use_networkmanager()
-        backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
 
         async def run() -> None:
-            cookie = await obtain_webvpn_cookie(profile, log=print)
-            rc = await backend.connect(profile, cookie, log=print)
+            secrets: SessionSecrets = await obtain_webvpn_secrets(profile, log=print)
+            backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
+            # If NetworkManager is requested but we lack a fingerprint/connect URL,
+            # fall back to direct openconnect for reliability.
+            if use_nm and not secrets.fingerprint:
+                print("NetworkManager backend missing gateway fingerprint; falling back to direct openconnect.")
+                backend = get_backend(use_networkmanager=False, use_pkexec=not args.no_pkexec)
+            rc = await backend.connect(profile, secrets, log=print)
             raise SystemExit(rc)
         asyncio.run(run())
 

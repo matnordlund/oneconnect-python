@@ -178,6 +178,14 @@ oneconnect disconnect Demo --nm
 
 **If you see "No valid secrets":** (1) On failure, the passwd-file path is logged—inspect it with `cat /tmp/tmpXXXX.txt`. (2) See which secrets the plugin expects by running `nmcli connection up oneconnect-<name> --ask` and noting the prompt labels (Cookie, Gateway, etc.). (3) For more detail, run with `NM_DEBUG=debug` and check `journalctl -u NetworkManager`.
 
+Internally, when `--nm` is enabled, OneConnect now performs a short TLS probe after the OIDC/NetWall bootstrap to discover the final AnyConnect connect URL and the gateway certificate fingerprint. These values are fed into NetworkManager as:
+
+- `vpn.secrets.cookie` – the `webvpn=...` cookie returned by NetWall.
+- `vpn.secrets.gateway` – the final connect URL (after any redirects).
+- `vpn.secrets.gwcert` – the TLS certificate fingerprint, which NM-openconnect passes to `openconnect` as `--servercert`.
+
+If the probe cannot obtain a fingerprint (for example due to TLS or connectivity issues), the CLI and GUI automatically fall back to launching `openconnect` directly instead of NetworkManager, so `oneconnect connect Demo` continues to work even when `oneconnect connect Demo --nm` cannot be satisfied by the local NM/openconnect stack.
+
 ## Dependencies
 
 Core runtime:
