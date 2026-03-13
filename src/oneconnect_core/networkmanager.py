@@ -163,8 +163,19 @@ async def activate_nm_connection(
     _dbg("H-C", "activate:dump", "connection profile vpn fields after ensure", {"lines": vpn_data_lines})
     # #endregion
 
-    # Strategy 1: passwd-file with only vpn.secrets.* (plural) keys.
-    # Strategy 2: set secrets via modify, then up, then clear.
+    # The NM openconnect plugin maps vpn.secrets.gwcert → --servercert.
+    # Use profile.servercert if available (same as direct runner).
+    gwcert = profile.servercert or ""
+
+    # #region agent log — H-I/H-J: log gwcert and profile details
+    _dbg("H-I", "activate:secrets_info", "secrets being prepared", {
+        "gateway": gateway,
+        "gwcert": gwcert,
+        "has_servercert": bool(profile.servercert),
+        "cookie_prefix": cookie[:20] if cookie else "",
+    })
+    # #endregion
+
     passwd_path = None
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -172,15 +183,16 @@ async def activate_nm_connection(
         delete=False,
         delete_on_close=False,
     ) as f:
-        # #region agent log — H-A: write only vpn.secrets.* (plural) to test singular rejection
         lines = [
             f"vpn.secrets.cookie:{cookie}",
             f"vpn.secrets.gateway:{gateway}",
-            f"vpn.secrets.gwcert:(null)",
         ]
+        if gwcert:
+            lines.append(f"vpn.secrets.gwcert:{gwcert}")
         content = "\n".join(lines) + "\n"
         f.write(content)
-        _dbg("H-A", "activate:passwd", "passwd-file content (keys only)", {"keys": [l.split(":")[0] for l in lines], "num_lines": len(lines)})
+        # #region agent log — H-I: log passwd-file keys
+        _dbg("H-I", "activate:passwd", "passwd-file content", {"keys": [l.split(":")[0] for l in lines], "num_lines": len(lines)})
         # #endregion
         f.flush()
         os.fsync(f.fileno())
@@ -194,44 +206,12 @@ async def activate_nm_connection(
             "passwd-file", passwd_path,
             log=log,
         )
-        # #region agent log — H-A/H-B: log passwd-file result
-        _dbg("H-A", "activate:passwd_result", "passwd-file attempt result", {"rc": rc, "err": err.strip()})
-        # #endregion
-        if rc == 0:
-            return 0
-        if "No valid secrets" not in err:
-            log(f"nmcli up failed: {err}")
-            log(f"Passwd-file kept for debugging: {passwd_path}")
-            return rc
-        # Fallback: set secrets on connection via modify, then up, then clear.
-        log("Passwd-file not accepted, trying modify-then-up fallback")
-        try:
-            Path(passwd_path).unlink(missing_ok=True)
-        except OSError:
-            pass
-        passwd_path = None
-        # nmcli expects all vpn.secrets as a single comma-separated value string.
-        secrets_str = f"cookie={cookie},gateway={gateway},gwcert=(null)"
-        rc_mod, _, err_mod = await _run_nmcli(
-            "connection", "modify", con_id,
-            "vpn.secrets", secrets_str,
-            log=log,
-        )
-        # #region agent log — H-E: log modify secrets result
-        _dbg("H-E", "activate:modify_secrets", "modify vpn.secrets result", {"rc": rc_mod, "err": err_mod.strip(), "secrets_str_keys": "cookie,gateway,gwcert"})
-        # #endregion
-        rc, out, err = await _run_nmcli("connection", "up", con_id, log=log)
-        # #region agent log — H-E: log fallback up result
-        _dbg("H-E", "activate:fallback_up", "fallback connection up result", {"rc": rc, "err": err.strip()})
+        # #region agent log — H-I: log result
+        _dbg("H-I", "activate:up_result", "connection up result", {"rc": rc, "err": err.strip()})
         # #endregion
         if rc != 0:
             log(f"nmcli up failed: {err}")
-        # Clear secrets from connection file so cookie is not stored.
-        await _run_nmcli(
-            "connection", "modify", con_id,
-            "vpn.secrets", "cookie=,gateway=,gwcert=",
-            log=log,
-        )
+            log(f"Passwd-file kept for debugging: {passwd_path}")
         return rc
     finally:
         if passwd_path and rc == 0:
