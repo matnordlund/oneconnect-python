@@ -97,40 +97,42 @@ async def ensure_nm_connection(
     con_id = _connection_id_from_profile(profile)
     gateway = _gateway_from_profile(profile)
 
-    # vpn.data keys for NM openconnect plugin (gateway required; rest optional)
-    vpn_data_parts = [f"gateway={gateway}"]
-    if profile.servercert:
-        vpn_data_parts.append(f"servercert={profile.servercert}")
-    # Many NM openconnect plugins support cert, csd, proxy, etc.
-    vpn_data = ",".join(vpn_data_parts)
-
     rc, out, err = await _run_nmcli(
         "connection", "show", con_id,
         log=log,
     )
     if rc == 0:
-        # Exists: update gateway and vpn.data
+        # Exists: update gateway and flags via modify
+        gateway_data = f"gateway={gateway}"
+        if profile.servercert:
+            gateway_data += f",servercert={profile.servercert}"
         rc2, _, _ = await _run_nmcli(
             "connection", "modify", con_id,
-            "vpn.data", vpn_data,
+            "vpn.data", gateway_data,
             log=log,
         )
         if rc2 != 0:
             raise NetworkManagerError(f"Failed to update NM connection {con_id}: {err}")
+        await _run_nmcli("connection", "modify", con_id, "+vpn.data", "cookie-flags=0", log=log)
+        await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gateway-flags=0", log=log)
         return con_id
 
-    # Add new connection: type vpn, openconnect
+    # Add new connection with gateway only, then set flags (some nmcli only take first vpn.data)
     rc, _, err = await _run_nmcli(
         "connection", "add",
         "type", "vpn",
         "con-name", con_id,
         "vpn.service-type", "org.freedesktop.NetworkManager.openconnect",
-        "vpn.data", vpn_data,
+        "vpn.data", f"gateway={gateway}",
         "connection.autoconnect", "false",
         log=log,
     )
     if rc != 0:
         raise NetworkManagerError(f"Failed to add NM connection {con_id}: {err}")
+    if profile.servercert:
+        await _run_nmcli("connection", "modify", con_id, "+vpn.data", f"servercert={profile.servercert}", log=log)
+    await _run_nmcli("connection", "modify", con_id, "+vpn.data", "cookie-flags=0", log=log)
+    await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gateway-flags=0", log=log)
     return con_id
 
 
@@ -147,15 +149,16 @@ async def activate_nm_connection(
     con_id = await ensure_nm_connection(profile, log=log)
     gateway = _gateway_from_profile(profile)
 
-    # NM openconnect plugin expects vpn.secrets.cookie and vpn.secrets.gateway
+    # Passwd-file: keyfile format [vpn-secrets] with cookie= and gateway= (NM keyfile plugin).
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".txt",
         delete=False,
         delete_on_close=False,
     ) as f:
-        f.write(f"vpn.secrets.cookie:{cookie}\n")
-        f.write(f"vpn.secrets.gateway:{gateway}\n")
+        f.write("[vpn-secrets]\n")
+        f.write(f"cookie={cookie}\n")
+        f.write(f"gateway={gateway}\n")
         path = f.name
 
     try:
