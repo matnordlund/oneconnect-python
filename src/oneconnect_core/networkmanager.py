@@ -115,8 +115,8 @@ async def ensure_nm_connection(
         log=log,
     )
     # Flags=2 (NOT_SAVED): NM asks the secret agent each time; nmcli+passwd-file acts as agent.
-    # protocol=anyconnect: tells the openconnect plugin which protocol to use.
-    base_data = f"gateway={gateway},protocol=anyconnect,cookie-flags=2,gateway-flags=2,gwcert-flags=2"
+    # gwcert-flags=4 (NOT_REQUIRED): gwcert is optional — only provided when profile has a cert pin.
+    base_data = f"gateway={gateway},protocol=anyconnect,cookie-flags=2,gateway-flags=2,gwcert-flags=4"
     if profile.servercert:
         base_data += f",servercert={profile.servercert}"
 
