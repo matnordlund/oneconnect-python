@@ -114,40 +114,33 @@ async def ensure_nm_connection(
         "connection", "show", con_id,
         log=log,
     )
+    # Flags=2 (NOT_SAVED): NM asks the secret agent each time; nmcli+passwd-file acts as agent.
+    # protocol=anyconnect: tells the openconnect plugin which protocol to use.
+    base_data = f"gateway={gateway},protocol=anyconnect,cookie-flags=2,gateway-flags=2,gwcert-flags=2"
+    if profile.servercert:
+        base_data += f",servercert={profile.servercert}"
+
     if rc == 0:
-        # Exists: update gateway and flags via modify
-        gateway_data = f"gateway={gateway}"
-        if profile.servercert:
-            gateway_data += f",servercert={profile.servercert}"
         rc2, _, _ = await _run_nmcli(
             "connection", "modify", con_id,
-            "vpn.data", gateway_data,
+            "vpn.data", base_data,
             log=log,
         )
         if rc2 != 0:
             raise NetworkManagerError(f"Failed to update NM connection {con_id}: {err}")
-        await _run_nmcli("connection", "modify", con_id, "+vpn.data", "cookie-flags=0", log=log)
-        await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gateway-flags=0", log=log)
-        await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gwcert-flags=4", log=log)
         return con_id
 
-    # Add new connection with gateway only, then set flags (some nmcli only take first vpn.data)
     rc, _, err = await _run_nmcli(
         "connection", "add",
         "type", "vpn",
         "con-name", con_id,
         "vpn.service-type", "org.freedesktop.NetworkManager.openconnect",
-        "vpn.data", f"gateway={gateway}",
+        "vpn.data", base_data,
         "connection.autoconnect", "false",
         log=log,
     )
     if rc != 0:
         raise NetworkManagerError(f"Failed to add NM connection {con_id}: {err}")
-    if profile.servercert:
-        await _run_nmcli("connection", "modify", con_id, "+vpn.data", f"servercert={profile.servercert}", log=log)
-    await _run_nmcli("connection", "modify", con_id, "+vpn.data", "cookie-flags=0", log=log)
-    await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gateway-flags=0", log=log)
-    await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gwcert-flags=4", log=log)
     return con_id
 
 
