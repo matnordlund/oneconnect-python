@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from .profiles import Profile
 
 # #region agent log
-_DBG_LOG = Path("/Users/mattias/src/oneconnect-python/.cursor/debug-5d8d44.log")
+_DBG_LOG = Path(tempfile.gettempdir()) / "oneconnect-debug-5d8d44.log"
 def _dbg(hypothesis: str, location: str, message: str, data: dict | None = None) -> None:
     try:
         with open(_DBG_LOG, "a") as _f:
