@@ -23,8 +23,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from oneconnect_core.clavister import obtain_webvpn_cookie
-from oneconnect_core.openconnect_runner import disconnect_openconnect, run_openconnect
+from oneconnect_core.config import get_use_networkmanager, set_use_networkmanager
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
+from oneconnect_core.runner import get_backend
+from oneconnect_core.networkmanager import is_networkmanager_available
 
 _APP_CSS = """
 .status-pill {
@@ -302,6 +304,19 @@ class MainWindow(Adw.ApplicationWindow):
         ct_header.pack_start(self.connect_btn)
         ct_header.pack_start(self.disconnect_btn)
 
+        self.nm_switch = Gtk.Switch(
+            valign=Gtk.Align.CENTER,
+            active=get_use_networkmanager(),
+            tooltip_text="Use NetworkManager to run the VPN" if is_networkmanager_available() else "NetworkManager not available",
+        )
+        if not is_networkmanager_available():
+            self.nm_switch.set_sensitive(False)
+        self.nm_switch.connect("state-set", self._on_nm_switch_changed)
+        nm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=12)
+        nm_row.append(Gtk.Label(label="Use NM", css_classes=["dim-label"]))
+        nm_row.append(self.nm_switch)
+        ct_header.pack_start(nm_row)
+
         edit_hb_btn = Gtk.Button(
             icon_name="document-properties-symbolic",
             tooltip_text="Edit profile",
@@ -497,6 +512,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.selected_profile = getattr(row, "profile", None) if row else None
         self._refresh_detail()
 
+    def _on_nm_switch_changed(self, switch: Gtk.Switch, state: bool) -> None:
+        set_use_networkmanager(state)
+        return False  # allow the state change
+
     def _on_add(self, _btn: Gtk.Button) -> None:
         def save(p: Profile) -> None:
             try:
@@ -539,6 +558,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._toast("Select a profile first")
             return
 
+        use_nm = get_use_networkmanager()
+        backend = get_backend(use_networkmanager=use_nm, use_pkexec=True)
+
         def worker() -> None:
             async def run() -> None:
                 try:
@@ -546,15 +568,18 @@ class MainWindow(Adw.ApplicationWindow):
                     cookie = await obtain_webvpn_cookie(profile, log=self.append_log)
                     self.append_log("Received session cookie, launching OpenConnect")
                     self.set_status("connecting")
-                    rc = await run_openconnect(
+                    rc = await backend.connect(
                         profile,
                         cookie,
                         log=self.append_log,
-                        use_pkexec=True,
                         proc_holder=self,
                     )
-                    self.set_status("disconnected")
-                    self.append_log(f"OpenConnect exited ({rc})")
+                    if use_nm and rc == 0:
+                        self.set_status("connected")
+                        self.append_log("NetworkManager connection activated")
+                    else:
+                        self.set_status("disconnected")
+                        self.append_log(f"OpenConnect exited ({rc})")
                 except Exception as exc:
                     self.append_log(f"ERROR: {exc}")
                     self.set_status("error")
@@ -568,15 +593,18 @@ class MainWindow(Adw.ApplicationWindow):
             self._toast("No active connection")
             return
 
+        use_nm = get_use_networkmanager()
+        backend = get_backend(use_networkmanager=use_nm, use_pkexec=True)
+        profile = self.selected_profile
+
         def worker() -> None:
             async def run() -> None:
                 try:
                     self.set_status("disconnecting")
-                    rc = await disconnect_openconnect(
-                        self.root_pid,
-                        profile=self.selected_profile,
+                    rc = await backend.disconnect(
+                        profile,
+                        root_pid=self.root_pid,
                         log=self.append_log,
-                        use_pkexec=True,
                     )
                     self.append_log(f"Disconnect exited ({rc})")
                     self.set_status("disconnected")

@@ -98,7 +98,8 @@ The GTK UI includes:
 - AV mode selection (`auto`, `script`, `manual`) and AV script path field
 - advanced OpenConnect fields (server certificate pin, user-agent, OS, extra args)
 - status pill that reflects Disconnected / Authenticating / Connecting / Connected / Error
-- connect / disconnect with reliable pkexec-based process handling
+- connect / disconnect with reliable pkexec-based process handling (direct or NetworkManager)
+- “Use NM” switch to run the VPN via NetworkManager when available
 - log output pane with auto-scroll and a Clear button
 - toast notifications for profile actions and errors
 
@@ -129,6 +130,26 @@ Disconnect:
 oneconnect disconnect Demo
 ```
 
+## NetworkManager backend
+
+You can run the VPN via **NetworkManager** instead of launching OpenConnect directly. The same OIDC flow and cookie are used; only the tunnel is started by NM’s openconnect plugin.
+
+**Enable:**
+
+- **CLI:** pass `--nm` (or `--network-manager`) to `connect` / `disconnect`, or set the default via config/env.
+- **GUI:** turn on the “Use NM” switch in the header bar.
+- **Config:** create `~/.config/oneconnect/config.json` with `{"use_networkmanager": true}`.
+- **Env:** set `ONECONNECT_USE_NM=1` (overrides config file).
+
+**Requirements:** `nmcli` and the openconnect VPN plugin (e.g. `network-manager-openconnect` or `NetworkManager-openconnect` on your distro). The plugin must be installed so that `nmcli connection add type vpn` can create an openconnect connection.
+
+**CLI with NM:**
+
+```bash
+oneconnect connect Demo --nm
+oneconnect disconnect Demo --nm
+```
+
 ## Dependencies
 
 Core runtime:
@@ -148,10 +169,15 @@ OpenConnect runtime:
 - `openconnect`
 - `pkexec` recommended
 
+When using the NetworkManager backend:
+
+- NetworkManager with `nmcli`
+- openconnect VPN plugin (e.g. `network-manager-openconnect`)
+
 ## Notes
 
 - This starter has been improved based on live Debian testing, but it is still a starter project rather than a packaged product.
-- The next logical steps are secure secret storage, a polished profile editor, and later NetworkManager integration.
+- NetworkManager integration is implemented as an optional backend (CLI `--nm`, GUI “Use NM” switch, config/env).
 
 ## License
 

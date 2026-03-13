@@ -6,8 +6,9 @@ import asyncio
 import json
 
 from oneconnect_core.clavister import obtain_webvpn_cookie
-from oneconnect_core.openconnect_runner import disconnect_openconnect, run_openconnect
+from oneconnect_core.config import get_use_networkmanager
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
+from oneconnect_core.runner import get_backend
 
 
 def main() -> None:
@@ -25,10 +26,16 @@ def main() -> None:
     connect = sub.add_parser("connect")
     connect.add_argument("name")
     connect.add_argument("--no-pkexec", action="store_true", help="Run openconnect directly without pkexec")
+    connect.add_argument("--nm", "--network-manager", dest="use_nm", action="store_true", help="Use NetworkManager to run the VPN")
+    connect.add_argument("--no-nm", dest="use_nm", action="store_false", help="Run openconnect directly (default)")
+    connect.set_defaults(use_nm=None)
 
     disconnect = sub.add_parser("disconnect")
     disconnect.add_argument("name")
     disconnect.add_argument("--no-pkexec", action="store_true", help="Run disconnect directly without pkexec")
+    disconnect.add_argument("--nm", "--network-manager", dest="use_nm", action="store_true", help="Use NetworkManager to disconnect")
+    disconnect.add_argument("--no-nm", dest="use_nm", action="store_false", help="Disconnect direct openconnect (default)")
+    disconnect.set_defaults(use_nm=None)
 
     args = parser.parse_args()
     store = ProfileStore()
@@ -57,9 +64,11 @@ def main() -> None:
         profile = store.get_by_name(args.name)
         if not profile:
             raise SystemExit(f"Profile not found: {args.name}")
+        use_nm = args.use_nm if args.use_nm is not None else get_use_networkmanager()
+        backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
 
         async def run_disconnect() -> None:
-            rc = await disconnect_openconnect(None, profile=profile, log=print, use_pkexec=not args.no_pkexec)
+            rc = await backend.disconnect(profile, root_pid=None, log=print)
             raise SystemExit(rc)
         asyncio.run(run_disconnect())
         return
@@ -68,10 +77,12 @@ def main() -> None:
         profile = store.get_by_name(args.name)
         if not profile:
             raise SystemExit(f"Profile not found: {args.name}")
+        use_nm = args.use_nm if args.use_nm is not None else get_use_networkmanager()
+        backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
 
         async def run() -> None:
             cookie = await obtain_webvpn_cookie(profile, log=print)
-            rc = await run_openconnect(profile, cookie, log=print, use_pkexec=not args.no_pkexec)
+            rc = await backend.connect(profile, cookie, log=print)
             raise SystemExit(rc)
         asyncio.run(run())
 
