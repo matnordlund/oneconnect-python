@@ -36,6 +36,18 @@ python3 oneconnect_cli.py list
 python3 -m oneconnect_gui.app   # GUI
 ```
 
+### Install troubleshooting
+
+- **ReadTimeoutError / "No matching distribution found" for setuptools**  
+  Pip is timing out when talking to PyPI. Try:
+  - Increase timeout: `pip install --timeout 120 -e .`
+  - Retry when the network is stable; if you use a VPN or proxy, ensure it allows access to pypi.org.
+  - If PyPI is unreachable but the venv already has setuptools and wheel, install without fetching build deps:
+    ```bash
+    pip install setuptools wheel   # if not already installed
+    pip install --no-build-isolation -e .
+    ```
+
 ## Project layout
 
 This project consists of:
