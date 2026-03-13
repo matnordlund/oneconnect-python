@@ -176,6 +176,8 @@ oneconnect connect Demo --nm
 oneconnect disconnect Demo --nm
 ```
 
+**If you see "No valid secrets":** On failure, the passwd-file path is logged so you can inspect it (e.g. `cat /tmp/tmpXXXX.txt`). For more detail from NetworkManager, run with `NM_DEBUG=debug` (e.g. `NM_DEBUG=debug oneconnect connect Demo --nm`) and check `journalctl -u NetworkManager` or the NM log.
+
 ## Dependencies
 
 Core runtime:

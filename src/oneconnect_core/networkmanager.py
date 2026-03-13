@@ -115,6 +115,7 @@ async def ensure_nm_connection(
             raise NetworkManagerError(f"Failed to update NM connection {con_id}: {err}")
         await _run_nmcli("connection", "modify", con_id, "+vpn.data", "cookie-flags=0", log=log)
         await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gateway-flags=0", log=log)
+        await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gwcert-flags=4", log=log)
         return con_id
 
     # Add new connection with gateway only, then set flags (some nmcli only take first vpn.data)
@@ -133,6 +134,7 @@ async def ensure_nm_connection(
         await _run_nmcli("connection", "modify", con_id, "+vpn.data", f"servercert={profile.servercert}", log=log)
     await _run_nmcli("connection", "modify", con_id, "+vpn.data", "cookie-flags=0", log=log)
     await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gateway-flags=0", log=log)
+    await _run_nmcli("connection", "modify", con_id, "+vpn.data", "gwcert-flags=4", log=log)
     return con_id
 
 
@@ -150,17 +152,25 @@ async def activate_nm_connection(
     gateway = _gateway_from_profile(profile)
 
     # Passwd-file must be "<setting>.<property>:<secret>" per line (nmcli requirement).
+    # NM 1.12+ uses vpn.secret.* (singular); older uses vpn.secrets.*. Supply both.
+    # gwcert can be empty when gwcert-flags=4 (not required); some plugins still expect the key.
     with tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".txt",
         delete=False,
         delete_on_close=False,
     ) as f:
+        f.write(f"vpn.secret.cookie:{cookie}\n")
+        f.write(f"vpn.secret.gateway:{gateway}\n")
+        f.write(f"vpn.secret.gwcert:\n")
         f.write(f"vpn.secrets.cookie:{cookie}\n")
         f.write(f"vpn.secrets.gateway:{gateway}\n")
+        f.write("vpn.secrets.gwcert:\n")
         path = f.name
 
+    rc = -1
     try:
+        log(f"Activating NM connection {con_id} (passwd-file: {path})")
         rc, out, err = await _run_nmcli(
             "connection", "up", con_id,
             "passwd-file", path,
@@ -168,12 +178,14 @@ async def activate_nm_connection(
         )
         if rc != 0:
             log(f"nmcli up failed: {err}")
+            log(f"Passwd-file kept for debugging: {path}")
         return rc
     finally:
-        try:
-            Path(path).unlink(missing_ok=True)
-        except OSError:
-            pass
+        if rc == 0:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 async def deactivate_nm_connection(
