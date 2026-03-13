@@ -184,11 +184,15 @@ async def activate_nm_connection(
         delete=False,
         delete_on_close=False,
     ) as f:
-        # Always provide all three keys; gwcert empty when no cert pin (gwcert-flags=4).
+        # Provide both vpn.secrets.* and vpn.secret.* (NM 1.12+ may use singular for final request).
+        # All three keys; gwcert empty when no cert pin (gwcert-flags=4).
         lines = [
             f"vpn.secrets.cookie:{cookie}",
             f"vpn.secrets.gateway:{gateway}",
             f"vpn.secrets.gwcert:{gwcert}",
+            f"vpn.secret.cookie:{cookie}",
+            f"vpn.secret.gateway:{gateway}",
+            f"vpn.secret.gwcert:{gwcert}",
         ]
         content = "\n".join(lines) + "\n"
         f.write(content)
