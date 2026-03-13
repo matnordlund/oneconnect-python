@@ -184,7 +184,10 @@ async def activate_nm_connection(
     # Single comma-separated string; cookie must not contain comma.
     if "," in cookie:
         log("Warning: cookie contains comma; modify-then-up may fail")
-    secrets_str = f"cookie={cookie},gateway={gateway},gwcert={gwcert}"
+    # Omit gwcert when empty so plugin does not get an empty value (can trigger "No valid secrets").
+    secrets_str = f"cookie={cookie},gateway={gateway}"
+    if gwcert:
+        secrets_str += f",gwcert={gwcert}"
     rc_mod, _, err_mod = await _run_nmcli(
         "connection", "modify", con_id,
         "vpn.secrets", secrets_str,
@@ -196,9 +199,6 @@ async def activate_nm_connection(
     if rc_mod != 0:
         log(f"nmcli modify vpn.secrets failed: {err_mod}")
         return rc_mod
-
-    # Reload so activation sees the updated secrets (required after modify).
-    await _run_nmcli("connection", "reload", log=log)
 
     rc = -1
     try:
