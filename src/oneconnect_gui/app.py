@@ -230,6 +230,13 @@ class TrayController:
         self._connect_submenu = None
         self._building = False
         self.refresh_menu()
+        # Poll connection state so tray stays in sync if user connects/disconnects via CLI
+        GLib.timeout_add_seconds(2, self._poll_connection_state)
+
+    def _poll_connection_state(self) -> bool:
+        """Called periodically; refresh tray so CLI connect/disconnect is reflected. Return True to keep polling."""
+        self.refresh_menu()
+        return True
 
     def refresh_menu(self) -> None:
         if self._building:
