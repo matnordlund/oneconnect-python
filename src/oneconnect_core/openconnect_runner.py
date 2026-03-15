@@ -171,7 +171,8 @@ async def run_openconnect(
             raise OpenConnectLaunchError("pkexec requested but not found in PATH")
         mkdir_bin = _find_mkdir()
         quoted_base = " ".join(_shell_quote(arg) for arg in base_args)
-        shell_cmd = f"exec {quoted_base}"
+        # Redirect stdout/stderr so the backgrounded daemon doesn't keep our pipe open
+        shell_cmd = f"exec {quoted_base} >/dev/null 2>&1"
         cmd = [pkexec, "/bin/sh", "-c", f"{_shell_quote(mkdir_bin)} -p /var/run/vpnc && {shell_cmd}"]
     else:
         cmd = base_args
