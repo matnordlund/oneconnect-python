@@ -1,645 +1,349 @@
+"""GTK3 systray GUI for OneConnect (Ubuntu/Yaru, Ayatana AppIndicator)."""
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import threading
+from pathlib import Path
 
 try:
     import gi
-
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gdk, GLib, Gtk
-except Exception as exc:  # pragma: no cover
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+    from gi.repository import AyatanaAppIndicator3 as AppIndicator
+    from gi.repository import Gdk, GLib, Gtk
+except (ValueError, ImportError) as exc:
     raise SystemExit(
-        "PyGObject/GTK4/libadwaita are required to run the GUI"
+        "PyGObject with Gtk 3.0 and AyatanaAppIndicator3 are required. "
+        "On Ubuntu: apt install gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1"
     ) from exc
 
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
+SRC = Path(__file__).resolve().parents[1]
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from oneconnect_core.clavister import obtain_webvpn_cookie, obtain_webvpn_secrets, SessionSecrets
-from oneconnect_core.config import get_use_networkmanager, set_use_networkmanager
+from oneconnect_core.clavister import obtain_webvpn_secrets, SessionSecrets
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
 from oneconnect_core.runner import get_backend
-from oneconnect_core.networkmanager import is_networkmanager_available
+from oneconnect_core.openconnect_runner import get_openconnect_log_file_path, get_tunnel_status
 
-_APP_CSS = """
-.status-pill {
-    padding: 4px 14px;
-    border-radius: 99px;
-    font-size: 13px;
-    font-weight: 600;
-}
-.status-disconnected {
-    background: alpha(@warning_color, 0.15);
-    color: @warning_color;
-}
-.status-connected {
-    background: alpha(@success_color, 0.15);
-    color: @success_color;
-}
-.status-error {
-    background: alpha(@error_color, 0.15);
-    color: @error_color;
-}
-.status-busy {
-    background: alpha(@accent_color, 0.15);
-    color: @accent_color;
-}
-"""
+INDICATOR_ID = "oneconnect"
+ICON_DISCONNECTED = "network-vpn-symbolic"
+ICON_CONNECTED = "emblem-default-symbolic"
 
 
-def _install_css() -> None:
-    provider = Gtk.CssProvider()
+def _find_connected_profile(store: ProfileStore):
+    """Return the profile that has an active tunnel, or None."""
+    for p in store.load().profiles:
+        if get_tunnel_status(p) is not None:
+            return p
+    return None
+
+
+def _open_log(profile: Profile) -> None:
+    path = get_openconnect_log_file_path(profile)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
     try:
-        provider.load_from_string(_APP_CSS)
-    except (TypeError, AttributeError):
-        provider.load_from_data(_APP_CSS.encode())
-    Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(),
-        provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-    )
+        subprocess.run(["xdg-open", str(path)], check=False, timeout=5)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
 
 
 # ---------------------------------------------------------------------------
-# Profile editor window
+# Indicator controller: tray icon + menu, refresh on state change
 # ---------------------------------------------------------------------------
 
-class ProfileEditWindow(Adw.Window):
-    """Profile editor using Adw.EntryRow and PreferencesGroup."""
-
-    def __init__(
-        self,
-        parent: Gtk.Window,
-        profile: Profile | None = None,
-        *,
-        on_save=None,
-    ):
-        super().__init__(
-            transient_for=parent,
-            modal=True,
-            title="Edit Profile" if profile else "New Profile",
-            default_width=500,
-            default_height=720,
+class TrayController:
+    def __init__(self, store: ProfileStore, on_show_manager=None):
+        self.store = store
+        self.on_show_manager = on_show_manager
+        self.indicator = AppIndicator.Indicator.new(
+            INDICATOR_ID,
+            ICON_DISCONNECTED,
+            AppIndicator.IndicatorCategory.SYSTEM_SERVICES,
         )
+        self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+        self._menu = Gtk.Menu()
+        self._connect_submenu = None
+        self._building = False
+        self.refresh_menu()
+
+    def refresh_menu(self) -> None:
+        if self._building:
+            return
+        self._building = True
+        # Clear existing items
+        for c in self._menu.get_children():
+            self._menu.remove(c)
+        connected = _find_connected_profile(self.store)
+        profiles = self.store.load().profiles
+
+        if connected:
+            self.indicator.set_icon_full(ICON_CONNECTED, "icon")
+            name = connected.name or connected.id[:12]
+            lab = Gtk.MenuItem(label=f"Connected: {name}")
+            lab.set_sensitive(False)
+            self._menu.append(lab)
+            sep = Gtk.SeparatorMenuItem()
+            self._menu.append(sep)
+            disc = Gtk.MenuItem(label="Disconnect")
+            disc.connect("activate", self._on_disconnect, connected)
+            self._menu.append(disc)
+            view_log = Gtk.MenuItem(label="View log")
+            view_log.connect("activate", self._on_view_log, connected)
+            self._menu.append(view_log)
+        else:
+            self.indicator.set_icon_full(ICON_DISCONNECTED, "icon")
+            connect_item = Gtk.MenuItem(label="Connect to")
+            self._connect_submenu = Gtk.Menu()
+            connect_item.set_submenu(self._connect_submenu)
+            self._menu.append(connect_item)
+            for p in profiles:
+                name = p.name or p.id[:12]
+                mi = Gtk.MenuItem(label=name)
+                mi.connect("activate", self._on_connect, p)
+                self._connect_submenu.append(mi)
+            if not profiles:
+                mi = Gtk.MenuItem(label="(no profiles)")
+                mi.set_sensitive(False)
+                self._connect_submenu.append(mi)
+
+        sep2 = Gtk.SeparatorMenuItem()
+        self._menu.append(sep2)
+        manage = Gtk.MenuItem(label="Manage profiles")
+        manage.connect("activate", self._on_manage)
+        self._menu.append(manage)
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", self._on_quit)
+        self._menu.append(quit_item)
+        self._menu.show_all()
+        self.indicator.set_menu(self._menu)
+        self._building = False
+
+    def _on_connect(self, _mi: Gtk.MenuItem, profile: Profile) -> None:
+        def run() -> None:
+            async def do_connect() -> None:
+                backend = get_backend(use_networkmanager=False, use_pkexec=True)
+                secrets = await obtain_webvpn_secrets(profile, log=lambda m: None)
+                await backend.connect(profile, secrets, log=lambda m: None)
+            asyncio.run(do_connect())
+            GLib.idle_add(self.refresh_menu)
+            # Refresh again after a short delay so the pid file is visible
+            GLib.timeout_add(800, self.refresh_menu)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_disconnect(self, _mi: Gtk.MenuItem, profile: Profile) -> None:
+        def run() -> None:
+            async def do_disconnect() -> None:
+                backend = get_backend(use_networkmanager=False, use_pkexec=True)
+                await backend.disconnect(profile, root_pid=None, log=lambda m: None)
+            asyncio.run(do_disconnect())
+            GLib.idle_add(self.refresh_menu)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_view_log(self, _mi: Gtk.MenuItem, profile: Profile) -> None:
+        _open_log(profile)
+
+    def _on_manage(self, _mi: Gtk.MenuItem) -> None:
+        if self.on_show_manager:
+            self.on_show_manager()
+
+    def _on_quit(self, _mi: Gtk.MenuItem) -> None:
+        Gtk.main_quit()
+
+
+# ---------------------------------------------------------------------------
+# Profile editor dialog (Add / Edit)
+# ---------------------------------------------------------------------------
+
+class ProfileEditDialog(Gtk.Dialog):
+    def __init__(self, parent: Gtk.Window, profile: Profile | None, on_save=None):
+        title = "Edit profile" if profile else "New profile"
+        super().__init__(title=title, transient_for=parent, modal=True)
+        self.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
+        self.set_default_response(Gtk.ResponseType.OK)
         self._profile = profile
         self._on_save = on_save
+        box = self.get_content_area()
+        grid = Gtk.Grid(column_spacing=12, row_spacing=12, margin=18)
+        row = 0
+        grid.attach(Gtk.Label(label="Profile name:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self.e_name = Gtk.Entry(hexpand=True)
+        self.e_name.set_text((profile.name or "") if profile else "")
+        grid.attach(self.e_name, 1, row, 1, 1)
+        row += 1
+        grid.attach(Gtk.Label(label="NetWall server URI:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self.e_server = Gtk.Entry(hexpand=True)
+        self.e_server.set_text((profile.server_uri or "") if profile else "")
+        grid.attach(self.e_server, 1, row, 1, 1)
+        row += 1
+        grid.attach(Gtk.Label(label="Username:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self.e_username = Gtk.Entry(hexpand=True)
+        self.e_username.set_text((profile.username or "user") if profile else "user")
+        grid.attach(self.e_username, 1, row, 1, 1)
+        row += 1
+        grid.attach(Gtk.Label(label="Device seed:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self.e_device = Gtk.Entry(hexpand=True)
+        self.e_device.set_text((profile.device_seed or "linux-device") if profile else "linux-device")
+        grid.attach(self.e_device, 1, row, 1, 1)
+        box.add(grid)
+        self.connect("response", self._on_response)
 
-        # Header
-        header = Adw.HeaderBar()
-        cancel = Gtk.Button(label="Cancel")
-        cancel.connect("clicked", lambda _: self.close())
-        save = Gtk.Button(label="Save")
-        save.add_css_class("suggested-action")
-        save.connect("clicked", self._save)
-        header.pack_start(cancel)
-        header.pack_end(save)
-
-        page = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=24,
-            margin_top=4,
-            margin_bottom=24,
-        )
-
-        # ── Server ──
-        g = Adw.PreferencesGroup(title="Server")
-        self.e_name = Adw.EntryRow(title="Profile name")
-        self.e_server = Adw.EntryRow(title="NetWall server URI")
-        for w in (self.e_name, self.e_server):
-            g.add(w)
-        page.append(g)
-
-        # ── Advanced ──
-        g = Adw.PreferencesGroup(title="Advanced")
-        self.e_cert = Adw.EntryRow(title="Server certificate pin")
-        self.e_ua = Adw.EntryRow(title="User-Agent")
-        self.e_os = Adw.EntryRow(title="VPN OS")
-        self.e_extra = Adw.EntryRow(title="Extra OpenConnect arguments")
-        for w in (self.e_cert, self.e_ua, self.e_os, self.e_extra):
-            g.add(w)
-        page.append(g)
-
-        # ── Antivirus / Posture ──
-        g = Adw.PreferencesGroup(
-            title="Antivirus / Posture",
-            description="Controls the AV status reported during authentication",
-        )
-        self.dd_av = Gtk.DropDown.new_from_strings(["auto", "script", "manual"])
-        self.dd_av.set_valign(Gtk.Align.CENTER)
-        r = Adw.ActionRow(title="Mode", subtitle="auto \u00b7 script \u00b7 manual")
-        r.add_suffix(self.dd_av)
-        r.set_activatable_widget(self.dd_av)
-        g.add(r)
-
-        self.e_av_script = Adw.EntryRow(title="Script path")
-        g.add(self.e_av_script)
-
-        self.sw_en = Gtk.Switch(valign=Gtk.Align.CENTER)
-        r = Adw.ActionRow(title="Manual: AV enabled")
-        r.add_suffix(self.sw_en)
-        r.set_activatable_widget(self.sw_en)
-        g.add(r)
-
-        self.sw_up = Gtk.Switch(valign=Gtk.Align.CENTER)
-        r = Adw.ActionRow(title="Manual: AV updated")
-        r.add_suffix(self.sw_up)
-        r.set_activatable_widget(self.sw_up)
-        g.add(r)
-        page.append(g)
-
-        # Populate fields
-        if profile:
-            self.e_name.set_text(profile.name)
-            self.e_server.set_text(profile.server_uri)
-            self.e_cert.set_text(profile.servercert or "")
-            self.e_ua.set_text(profile.useragent)
-            self.e_os.set_text(profile.vpn_os)
-            self.e_extra.set_text(" ".join(profile.extra_openconnect_args))
-            modes = ["auto", "script", "manual"]
-            self.dd_av.set_selected(
-                modes.index(profile.av.mode) if profile.av.mode in modes else 0
+    def _on_response(self, _dlg: Gtk.Dialog, resp: int) -> None:
+        if resp != Gtk.ResponseType.OK:
+            return
+        name = self.e_name.get_text().strip()
+        server = self.e_server.get_text().strip()
+        if not name or not server:
+            return
+        username = self.e_username.get_text().strip() or "user"
+        device = self.e_device.get_text().strip() or "linux-device"
+        if self._profile:
+            p = Profile(
+                id=self._profile.id,
+                name=name,
+                server_uri=server,
+                username=username,
+                device_seed=device,
+                openconnect_server=self._profile.openconnect_server,
+                servercert=self._profile.servercert,
+                useragent=self._profile.useragent,
+                vpn_os=self._profile.vpn_os,
+                extra_openconnect_args=list(self._profile.extra_openconnect_args),
+                av=AVConfig(**__import__("dataclasses").asdict(self._profile.av)),
             )
-            self.e_av_script.set_text(profile.av.script_path or "")
-            self.sw_en.set_active(profile.av.manual_enabled)
-            self.sw_up.set_active(profile.av.manual_updated)
         else:
-            self.e_ua.set_text("OpenConnect (Clavister OneConnect VPN)")
-            self.e_os.set_text("linux")
-
-        self.dd_av.connect("notify::selected", self._av_mode_changed)
-        self._av_mode_changed()
-
-        clamp = Adw.Clamp(maximum_size=500, child=page)
-        scroll = Gtk.ScrolledWindow(
-            child=clamp,
-            vexpand=True,
-            hscrollbar_policy=Gtk.PolicyType.NEVER,
-        )
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        outer.append(header)
-        outer.append(scroll)
-        self.set_content(outer)
-
-    # -- internals --
-
-    def _av_mode_changed(self, *_args) -> None:
-        m = ["auto", "script", "manual"][self.dd_av.get_selected()]
-        self.e_av_script.set_sensitive(m == "script")
-        self.sw_en.set_sensitive(m == "manual")
-        self.sw_up.set_sensitive(m == "manual")
-
-    def _save(self, _btn: Gtk.Button) -> None:
-        p = Profile(
-            id=self._profile.id if self._profile else Profile().id,
-            name=self.e_name.get_text().strip(),
-            server_uri=self.e_server.get_text().strip(),
-            servercert=self.e_cert.get_text().strip() or None,
-            useragent=(
-                self.e_ua.get_text().strip()
-                or "OpenConnect (Clavister OneConnect VPN)"
-            ),
-            vpn_os=self.e_os.get_text().strip() or "linux",
-            extra_openconnect_args=self.e_extra.get_text().split(),
-            av=AVConfig(
-                mode=["auto", "script", "manual"][self.dd_av.get_selected()],
-                script_path=self.e_av_script.get_text().strip() or None,
-                manual_enabled=self.sw_en.get_active(),
-                manual_updated=self.sw_up.get_active(),
-            ),
-        )
+            p = Profile(
+                name=name,
+                server_uri=server,
+                username=username,
+                device_seed=device,
+                av=AVConfig(),
+            )
         if self._on_save:
             self._on_save(p)
-        self.close()
 
 
 # ---------------------------------------------------------------------------
-# Main window
+# Profile manager window
 # ---------------------------------------------------------------------------
 
-_STATUS_MAP: dict[str, tuple[str, str]] = {
-    "disconnected": ("Disconnected", "status-disconnected"),
-    "authenticating": ("Authenticating\u2026", "status-busy"),
-    "connecting": ("Connecting\u2026", "status-busy"),
-    "connected": ("Connected", "status-connected"),
-    "disconnecting": ("Disconnecting\u2026", "status-busy"),
-    "error": ("Error", "status-error"),
-}
-
-
-class MainWindow(Adw.ApplicationWindow):
-    def __init__(self, app: Adw.Application):
-        super().__init__(
-            application=app,
-            title="OneConnect",
-            default_width=980,
-            default_height=640,
-        )
-        self.store = ProfileStore()
-        self.data = self.store.load()
-        self.selected_profile: Profile | None = (
-            self.data.profiles[0] if self.data.profiles else None
-        )
-        self.current_proc = None
-        self.root_pid = None
-
-        self.toast_overlay = Adw.ToastOverlay()
-        self.set_content(self.toast_overlay)
-
-        # ── Sidebar ──────────────────────────────────────────────────────
-        sb_header = Adw.HeaderBar(
-            show_start_title_buttons=False,
-            show_end_title_buttons=False,
-        )
-        sb_header.set_title_widget(
-            Gtk.Label(label="Profiles", css_classes=["heading"])
-        )
-        add_btn = Gtk.Button(
-            icon_name="list-add-symbolic", tooltip_text="Add profile"
-        )
+class ProfileManagerWindow(Gtk.Window):
+    def __init__(self, store: ProfileStore, on_refresh_tray=None):
+        super().__init__(title="OneConnect – Profiles")
+        self.set_default_size(480, 360)
+        self.store = store
+        self.on_refresh_tray = on_refresh_tray
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=12)
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        add_btn = Gtk.Button(label="Add", image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON))
         add_btn.connect("clicked", self._on_add)
-        sb_header.pack_end(add_btn)
+        edit_btn = Gtk.Button(label="Edit", image=Gtk.Image.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.BUTTON))
+        edit_btn.connect("clicked", self._on_edit)
+        delete_btn = Gtk.Button(label="Delete", image=Gtk.Image.new_from_icon_name("user-trash-symbolic", Gtk.IconSize.BUTTON))
+        delete_btn.connect("clicked", self._on_delete)
+        toolbar.pack_start(add_btn, False, False, 0)
+        toolbar.pack_start(edit_btn, False, False, 0)
+        toolbar.pack_start(delete_btn, False, False, 0)
+        box.pack_start(toolbar, False, False, 0)
+        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.listbox.connect("row-activated", self._on_activated)
+        scroll.add(self.listbox)
+        box.pack_start(scroll, True, True, 0)
+        self.add(box)
+        self._fill()
+        self.connect("destroy", self._on_destroy)
 
-        self.profile_list = Gtk.ListBox(
-            selection_mode=Gtk.SelectionMode.SINGLE,
-            css_classes=["navigation-sidebar"],
-        )
-        self.profile_list.connect("row-selected", self._on_row_selected)
-
-        sb_scroll = Gtk.ScrolledWindow(
-            child=self.profile_list,
-            vexpand=True,
-            hscrollbar_policy=Gtk.PolicyType.NEVER,
-        )
-        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        sidebar.append(sb_header)
-        sidebar.append(sb_scroll)
-
-        # ── Content pane ─────────────────────────────────────────────────
-        ct_header = Adw.HeaderBar()
-
-        self.status_label = Gtk.Label(
-            label="Disconnected",
-            css_classes=["status-pill", "status-disconnected"],
-        )
-        ct_header.set_title_widget(self.status_label)
-
-        self.connect_btn = Gtk.Button(
-            label="Connect", css_classes=["suggested-action"]
-        )
-        self.connect_btn.connect("clicked", self._on_connect)
-
-        self.disconnect_btn = Gtk.Button(
-            label="Disconnect", css_classes=["destructive-action"]
-        )
-        self.disconnect_btn.connect("clicked", self._on_disconnect)
-        self.disconnect_btn.set_sensitive(False)
-
-        ct_header.pack_start(self.connect_btn)
-        ct_header.pack_start(self.disconnect_btn)
-
-        self.nm_switch = Gtk.Switch(
-            valign=Gtk.Align.CENTER,
-            active=get_use_networkmanager(),
-            tooltip_text="Use NetworkManager to run the VPN" if is_networkmanager_available() else "NetworkManager not available",
-        )
-        if not is_networkmanager_available():
-            self.nm_switch.set_sensitive(False)
-        self.nm_switch.connect("state-set", self._on_nm_switch_changed)
-        nm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=12)
-        nm_row.append(Gtk.Label(label="Use NM", css_classes=["dim-label"]))
-        nm_row.append(self.nm_switch)
-        ct_header.pack_start(nm_row)
-
-        edit_hb_btn = Gtk.Button(
-            icon_name="document-properties-symbolic",
-            tooltip_text="Edit profile",
-            css_classes=["flat"],
-        )
-        edit_hb_btn.connect("clicked", self._on_edit)
-        delete_hb_btn = Gtk.Button(
-            icon_name="user-trash-symbolic",
-            tooltip_text="Delete profile",
-            css_classes=["flat"],
-        )
-        delete_hb_btn.connect("clicked", self._on_delete)
-        ct_header.pack_end(delete_hb_btn)
-        ct_header.pack_end(edit_hb_btn)
-
-        # Stack: empty state vs detail
-        self.content_stack = Gtk.Stack(
-            transition_type=Gtk.StackTransitionType.CROSSFADE,
-        )
-        self.content_stack.add_named(
-            Adw.StatusPage(
-                icon_name="network-vpn-symbolic",
-                title="No Profile Selected",
-                description="Add or select a VPN profile from the sidebar",
-            ),
-            "empty",
-        )
-
-        # Detail page
-        detail = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=0,
-            margin_start=16,
-            margin_end=16,
-            margin_top=8,
-            margin_bottom=8,
-        )
-
-        self.info_group = Adw.PreferencesGroup(title="Profile")
-        self.row_server = Adw.ActionRow(title="NetWall server", subtitle="-")
-        self.row_oc = Adw.ActionRow(title="OpenConnect target", subtitle="-")
-        self.row_av = Adw.ActionRow(title="AV mode", subtitle="-")
-        self.row_advanced = Adw.ActionRow(title="Advanced", subtitle="-")
-        for row in (self.row_server, self.row_oc, self.row_av, self.row_advanced):
-            self.info_group.add(row)
-
-        info_clamp = Adw.Clamp(maximum_size=700, child=self.info_group)
-        detail.append(info_clamp)
-
-        # Log
-        log_hdr = Gtk.Box(spacing=8, margin_top=16, margin_bottom=4)
-        log_hdr.append(
-            Gtk.Label(label="Log", css_classes=["heading"], hexpand=True, xalign=0)
-        )
-        clear_btn = Gtk.Button(
-            icon_name="edit-clear-all-symbolic",
-            css_classes=["flat"],
-            tooltip_text="Clear log",
-        )
-        clear_btn.connect("clicked", lambda _: self.log_buffer.set_text(""))
-        log_hdr.append(clear_btn)
-        detail.append(log_hdr)
-
-        self.log_view = Gtk.TextView(
-            editable=False,
-            monospace=True,
-            wrap_mode=Gtk.WrapMode.WORD_CHAR,
-            top_margin=8,
-            bottom_margin=8,
-            left_margin=12,
-            right_margin=12,
-        )
-        self.log_buffer = self.log_view.get_buffer()
-        log_scroll = Gtk.ScrolledWindow(child=self.log_view, vexpand=True)
-        log_frame = Gtk.Frame(child=log_scroll, vexpand=True)
-        detail.append(log_frame)
-
-        self.content_stack.add_named(detail, "detail")
-
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content_box.append(ct_header)
-        content_box.append(self.content_stack)
-
-        # ── Split view ───────────────────────────────────────────────────
-        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        paned.set_start_child(sidebar)
-        paned.set_end_child(content_box)
-        paned.set_position(280)
-        paned.set_shrink_start_child(False)
-        paned.set_shrink_end_child(False)
-
-        self.toast_overlay.set_child(paned)
-        self._refresh_list()
-        self._refresh_detail()
-
-    # ── Helpers ───────────────────────────────────────────────────────────
-
-    def _toast(self, msg: str) -> None:
-        GLib.idle_add(lambda: self.toast_overlay.add_toast(Adw.Toast(title=msg)))
-
-    def append_log(self, text: str) -> None:
-        def _do():
-            end = self.log_buffer.get_end_iter()
-            self.log_buffer.insert(end, text + "\n")
-            # Heuristics: when OpenConnect reports a stable tunnel, mark as connected.
-            lower = text.lower()
-            if (
-                "connected to" in lower
-                or "connected as" in lower
-                or "dtls connection established" in lower
-                or "esp session established" in lower
-            ):
-                self.set_status("connected")
-            mark = self.log_buffer.create_mark(
-                None, self.log_buffer.get_end_iter(), False
-            )
-            self.log_view.scroll_to_mark(mark, 0, False, 0, 0)
-        GLib.idle_add(_do)
-
-    def set_status(self, state: str) -> None:
-        def _do():
-            label, css_cls = _STATUS_MAP.get(state, ("Unknown", "status-error"))
-            self.status_label.set_label(label)
-            for cls in ("status-disconnected", "status-connected", "status-error", "status-busy"):
-                self.status_label.remove_css_class(cls)
-            self.status_label.add_css_class(css_cls)
-            busy = state in ("authenticating", "connecting", "disconnecting")
-            self.connect_btn.set_sensitive(not busy and state != "connected")
-            self.disconnect_btn.set_sensitive(state == "connected" or busy)
-        GLib.idle_add(_do)
-
-    # ── List / detail refresh ─────────────────────────────────────────────
-
-    def _refresh_list(self) -> None:
-        while row := self.profile_list.get_first_child():
-            self.profile_list.remove(row)
-        self.data = self.store.load()
-        selected_idx = 0
-        for idx, p in enumerate(self.data.profiles):
+    def _fill(self) -> None:
+        for c in self.listbox.get_children():
+            self.listbox.remove(c)
+        for p in self.store.load().profiles:
             row = Gtk.ListBoxRow()
-            box = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL,
-                spacing=2,
-                margin_top=6,
-                margin_bottom=6,
-                margin_start=6,
-                margin_end=6,
-            )
-            box.append(Gtk.Label(label=p.name, xalign=0, css_classes=["heading"]))
-            box.append(
-                Gtk.Label(
-                    label=p.server_uri,
-                    xalign=0,
-                    css_classes=["dim-label", "caption"],
-                )
-            )
-            row.set_child(box)
-            row.profile = p  # type: ignore[attr-defined]
-            self.profile_list.append(row)
-            if self.selected_profile and p.id == self.selected_profile.id:
-                selected_idx = idx
-        if self.data.profiles:
-            self.profile_list.select_row(
-                self.profile_list.get_row_at_index(selected_idx)
-            )
-        else:
-            self.selected_profile = None
-        self._refresh_detail()
+            lab = Gtk.Label(label=p.name or p.id[:12], xalign=0)
+            row.add(lab)
+            row.profile = p
+            self.listbox.add(row)
+        self.listbox.show_all()
 
-    def _refresh_detail(self) -> None:
-        p = self.selected_profile
-        if not p:
-            self.content_stack.set_visible_child_name("empty")
-            return
-        self.content_stack.set_visible_child_name("detail")
-        self.info_group.set_title(p.name)
-        self.row_server.set_subtitle(p.server_uri or "\u2014")
-        self.row_oc.set_subtitle(p.openconnect_server or p.server_uri or "\u2014")
-        av = p.av.mode
-        if p.av.script_path:
-            av += f"  ({p.av.script_path})"
-        elif p.av.mode == "manual":
-            av += f"  enabled={p.av.manual_enabled}  updated={p.av.manual_updated}"
-        self.row_av.set_subtitle(av)
-        adv = f"os={p.vpn_os}  ua={p.useragent}"
-        if p.extra_openconnect_args:
-            adv += f"  extra={' '.join(p.extra_openconnect_args)}"
-        self.row_advanced.set_subtitle(adv)
+    def _on_destroy(self, _w: Gtk.Window) -> None:
+        if self.on_refresh_tray:
+            self.on_refresh_tray()
 
-    # ── Callbacks ─────────────────────────────────────────────────────────
+    def _selected_profile(self) -> Profile | None:
+        row = self.listbox.get_selected_row()
+        return getattr(row, "profile", None) if row else None
 
-    def _on_row_selected(self, _lb: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
-        self.selected_profile = getattr(row, "profile", None) if row else None
-        self._refresh_detail()
-
-    def _on_nm_switch_changed(self, switch: Gtk.Switch, state: bool) -> None:
-        set_use_networkmanager(state)
-        return False  # allow the state change
+    def _on_activated(self, _lb: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        self._on_edit(None)
 
     def _on_add(self, _btn: Gtk.Button) -> None:
-        def save(p: Profile) -> None:
-            try:
-                self.store.upsert_profile(p)
-                self.selected_profile = p
-                self._refresh_list()
-                self._toast("Profile added")
-            except Exception as exc:
-                self._toast(f"Error: {exc}")
+        dlg = ProfileEditDialog(self, None, on_save=self._saved)
+        dlg.run()
+        dlg.destroy()
 
-        ProfileEditWindow(self, on_save=save).present()
-
-    def _on_edit(self, _btn: Gtk.Button) -> None:
-        if not self.selected_profile:
+    def _on_edit(self, _btn: Gtk.Button | None) -> None:
+        p = self._selected_profile()
+        if not p:
             return
-
-        def save(p: Profile) -> None:
-            try:
-                self.store.upsert_profile(p)
-                self.selected_profile = p
-                self._refresh_list()
-                self._toast("Profile saved")
-            except Exception as exc:
-                self._toast(f"Error: {exc}")
-
-        ProfileEditWindow(self, profile=self.selected_profile, on_save=save).present()
+        dlg = ProfileEditDialog(self, p, on_save=self._saved)
+        dlg.run()
+        dlg.destroy()
 
     def _on_delete(self, _btn: Gtk.Button) -> None:
-        if not self.selected_profile:
+        p = self._selected_profile()
+        if not p:
             return
-        name = self.selected_profile.name
-        self.store.delete_profile(self.selected_profile.id)
-        self.selected_profile = None
-        self._refresh_list()
-        self._toast(f"Deleted {name}")
+        d = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Delete profile “{p.name or p.id[:12]}”?",
+        )
+        d.format_secondary_text("This cannot be undone.")
+        if d.run() == Gtk.ResponseType.YES:
+            self.store.delete_profile(p.id)
+            self._fill()
+            if self.on_refresh_tray:
+                self.on_refresh_tray()
+        d.destroy()
 
-    def _on_connect(self, _btn: Gtk.Button) -> None:
-        profile = self.selected_profile
-        if not profile:
-            self._toast("Select a profile first")
-            return
-
-        use_nm = get_use_networkmanager()
-        backend = get_backend(use_networkmanager=use_nm, use_pkexec=True)
-
-        def worker() -> None:
-            async def run() -> None:
-                try:
-                    self.set_status("authenticating")
-                    secrets: SessionSecrets = await obtain_webvpn_secrets(profile, log=self.append_log)
-                    self.append_log("Received session secrets, launching OpenConnect")
-                    backend_local = backend
-                    if use_nm and not secrets.fingerprint:
-                        self.append_log("NetworkManager backend missing gateway fingerprint; falling back to direct openconnect.")
-                        backend_local = get_backend(use_networkmanager=False, use_pkexec=True)
-                    self.set_status("connecting")
-                    rc = await backend_local.connect(
-                        profile,
-                        secrets,
-                        log=self.append_log,
-                        proc_holder=self,
-                    )
-                    if use_nm and rc == 0:
-                        self.set_status("connected")
-                        self.append_log("NetworkManager connection activated")
-                    else:
-                        self.set_status("disconnected")
-                        self.append_log(f"OpenConnect exited ({rc})")
-                except Exception as exc:
-                    self.append_log(f"ERROR: {exc}")
-                    self.set_status("error")
-
-            asyncio.run(run())
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_disconnect(self, _btn: Gtk.Button) -> None:
-        if not self.selected_profile and not self.current_proc:
-            self._toast("No active connection")
-            return
-
-        use_nm = get_use_networkmanager()
-        backend = get_backend(use_networkmanager=use_nm, use_pkexec=True)
-        profile = self.selected_profile
-
-        def worker() -> None:
-            async def run() -> None:
-                try:
-                    self.set_status("disconnecting")
-                    rc = await backend.disconnect(
-                        profile,
-                        root_pid=self.root_pid,
-                        log=self.append_log,
-                    )
-                    self.append_log(f"Disconnect exited ({rc})")
-                    self.set_status("disconnected")
-                except Exception as exc:
-                    self.append_log(f"ERROR: {exc}")
-                    self.set_status("error")
-
-            asyncio.run(run())
-
-        threading.Thread(target=worker, daemon=True).start()
+    def _saved(self, profile: Profile) -> None:
+        self.store.upsert_profile(profile)
+        self._fill()
+        if self.on_refresh_tray:
+            self.on_refresh_tray()
 
 
 # ---------------------------------------------------------------------------
-# Application
+# Application entry
 # ---------------------------------------------------------------------------
-
-class OneConnectApp(Adw.Application):
-    def __init__(self) -> None:
-        super().__init__(application_id="com.clavister.OneConnect")
-        self._css_loaded = False
-
-    def do_activate(self) -> None:
-        if not self._css_loaded:
-            _install_css()
-            self._css_loaded = True
-        win = self.props.active_window or MainWindow(self)
-        win.present()
-
 
 def main() -> None:
-    OneConnectApp().run(None)
+    store = ProfileStore()
+    manager_ref = []
+
+    def show_manager() -> None:
+        if manager_ref:
+            win = manager_ref[0]
+            win.present()
+            return
+        win = ProfileManagerWindow(store, on_refresh_tray=lambda: tray.refresh_menu())
+        manager_ref.append(win)
+        win.connect("destroy", lambda w: manager_ref.clear() if w in manager_ref else None)
+        win.show_all()
+
+    tray = TrayController(store, on_show_manager=show_manager)
+
+    # Optional: if no profiles, open manager so user can add one
+    if not store.load().profiles:
+        GLib.idle_add(show_manager)
+
+    Gtk.main()
 
 
 if __name__ == "__main__":

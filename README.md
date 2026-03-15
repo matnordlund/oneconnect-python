@@ -1,6 +1,6 @@
 # OneConnect Python Wrapper
 
-Clavister NetWall OIDC + OpenConnect helper with a reusable core and GTK4 UI for Linux.
+Clavister NetWall OIDC + OpenConnect helper with a reusable core and a systray GUI for Ubuntu/Linux.
 
 ## Installation
 
@@ -17,7 +17,7 @@ pip install -e .
 Then run the CLI or GUI with the venv active:
 
 - `oneconnect` — CLI (list, add-profile, connect, disconnect, status)
-- `oneconnect-gui` — GTK profile picker and connection UI
+- `oneconnect-gui` — systray icon and profile manager (GTK3, Yaru theme)
 
 To leave the venv: `deactivate`. To use the app again later: `cd oneconnect-python && source .venv/bin/activate`, then `oneconnect` or `oneconnect-gui`.
 
@@ -55,7 +55,7 @@ python3 -m oneconnect_gui.app   # GUI
 This project consists of:
 
 - `oneconnect_core`: reusable auth, profile, AV, and OpenConnect launch logic
-- `oneconnect_gui`: a GTK4/libadwaita profile picker and connection UI
+- `oneconnect_gui`: a GTK3 systray app and profile manager (Ubuntu/Yaru)
 - `oneconnect_cli.py`: a simple CLI for testing and automation
 
 ## Highlights
@@ -117,18 +117,11 @@ The script is expected to return exit code `0` on success.
 
 ## GUI features
 
-The GTK UI includes:
+The GUI is systray-first and uses the system theme (e.g. Yaru on Ubuntu, including dark/light):
 
-- profile picker sidebar with libadwaita navigation styling
-- add / edit / delete profiles
-- modern profile editor using `Adw.PreferencesGroup` and `Adw.EntryRow`
-- AV mode selection (`auto`, `script`, `manual`) and AV script path field
-- advanced OpenConnect fields (server certificate pin, user-agent, OS, extra args)
-- status pill that reflects Disconnected / Authenticating / Connecting / Connected / Error
-- connect / disconnect with reliable pkexec-based process handling (direct or NetworkManager)
-- “Use NM” switch to run the VPN via NetworkManager when available
-- log output pane with auto-scroll and a Clear button
-- toast notifications for profile actions and errors
+- **System tray (Ayatana AppIndicator):** One icon in the panel; menu lists all configured profiles. Select “Connect to” → &lt;profile&gt; to connect. When connected, the icon changes, and the menu shows “Connected: &lt;name&gt;”, “Disconnect”, and “View log” (opens the tunnel log file in your default editor).
+- **Profile manager:** Open “Manage profiles” from the tray to add, edit, and delete profiles (name, NetWall server URI, username, device seed). If you start the GUI with no profiles, the manager window opens so you can add one.
+- **Dependencies:** GTK3 and Ayatana AppIndicator. On Ubuntu: `apt install gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1` (and the matching libraries, e.g. `libayatana-appindicator3-1`). The GUI uses the direct OpenConnect backend only (no NetworkManager option in the tray).
 
 ## CLI examples
 
@@ -165,14 +158,15 @@ oneconnect disconnect
 oneconnect disconnect Demo
 ```
 
-## NetworkManager backend
+## NetworkManager backend *(experimental, mostly broken)*
+
+**Warning:** The NetworkManager integration is experimental and often fails in practice (e.g. “Connection activation failed: Unknown reason” with current NM-openconnect on many distros). Prefer the default direct OpenConnect backend for reliable use.
 
 You can run the VPN via **NetworkManager** instead of launching OpenConnect directly. The same OIDC flow and cookie are used; only the tunnel is started by NM’s openconnect plugin.
 
 **Enable:**
 
 - **CLI:** pass `--nm` (or `--network-manager`) to `connect` / `disconnect`, or set the default via config/env.
-- **GUI:** turn on the “Use NM” switch in the header bar.
 - **Config:** create `~/.config/oneconnect/config.json` with `{"use_networkmanager": true}`.
 - **Env:** set `ONECONNECT_USE_NM=1` (overrides config file).
 
@@ -193,7 +187,7 @@ Internally, when `--nm` is enabled, OneConnect now performs a short TLS probe af
 - `vpn.secrets.gateway` – the final connect URL (after any redirects).
 - `vpn.secrets.gwcert` – the TLS certificate fingerprint, which NM-openconnect passes to `openconnect` as `--servercert`.
 
-If the probe cannot obtain a fingerprint (for example due to TLS or connectivity issues), the CLI and GUI automatically fall back to launching `openconnect` directly instead of NetworkManager, so `oneconnect connect Demo` continues to work even when `oneconnect connect Demo --nm` cannot be satisfied by the local NM/openconnect stack.
+If the probe cannot obtain a fingerprint (for example due to TLS or connectivity issues), the CLI automatically falls back to launching `openconnect` directly instead of NetworkManager, so `oneconnect connect Demo` continues to work even when `oneconnect connect Demo --nm` cannot be satisfied by the local NM/openconnect stack.
 
 ## Dependencies
 
@@ -203,11 +197,10 @@ Core runtime:
 - `aiohttp`
 - `PyJWT`
 
-GUI runtime:
+GUI runtime (Ubuntu):
 
-- GTK4
-- libadwaita 1
-- PyGObject
+- GTK3 and Ayatana AppIndicator (e.g. `gir1.2-gtk-3.0`, `gir1.2-ayatanaappindicator3-0.1`, `libayatana-appindicator3-1`)
+- PyGObject (`python3-gi`)
 
 OpenConnect runtime:
 
@@ -222,7 +215,7 @@ When using the NetworkManager backend:
 ## Notes
 
 - This starter has been improved based on live Debian testing, but it is still a starter project rather than a packaged product.
-- NetworkManager integration is implemented as an optional backend (CLI `--nm`, GUI “Use NM” switch, config/env).
+- NetworkManager integration is implemented as an optional, experimental backend (CLI `--nm`, config/env); it is mostly broken on many setups—use direct OpenConnect for reliability.
 
 ## License
 
