@@ -35,7 +35,16 @@ try:
     except (ValueError, ImportError):
         gi.require_version("AppIndicator3", "0.1")
         from gi.repository import AppIndicator3 as AppIndicator
-except (ValueError, ImportError) as exc:
+except (ValueError, ImportError, ModuleNotFoundError) as exc:
+    _msg = str(exc)
+    if "gi" in _msg.lower() and ("module" in _msg.lower() or "no module" in _msg.lower()):
+        raise SystemExit(
+            "The 'gi' module (PyGObject) is not installed in this environment.\n"
+            "On Ubuntu/Debian, install system packages and run the GUI with system Python:\n"
+            "  sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1\n"
+            "  python3 -m oneconnect_gui.app\n"
+            "Or use a venv created with --system-site-packages so it can see the system's python3-gi."
+        ) from exc
     raise SystemExit(
         "PyGObject with Gtk 3.0 and an app indicator are required.\n"
         "Install: gir1.2-gtk-3.0 and one of gir1.2-ayatanaappindicator3-0.1 or gir1.2-appindicator3-0.1.\n"
@@ -506,25 +515,34 @@ class ProfileManagerWindow(Gtk.Window):
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    if not Gtk.init_check():
+        raise SystemExit("Could not initialize GTK. Is DISPLAY set? Run from a graphical session.")
     store = ProfileStore()
-    manager_ref = []
+    manager_ref: list = []
+    tray_ref: list = []
 
     def show_manager() -> None:
         if manager_ref:
             win = manager_ref[0]
             win.present()
             return
-        win = ProfileManagerWindow(store, on_refresh_tray=lambda: tray.refresh_menu())
+        if tray_ref:
+            win = ProfileManagerWindow(store, on_refresh_tray=lambda: tray_ref[0].refresh_menu())
+        else:
+            win = ProfileManagerWindow(store, on_refresh_tray=lambda: None)
         manager_ref.append(win)
         win.connect("destroy", lambda w: manager_ref.clear() if w in manager_ref else None)
         win.show_all()
 
-    tray = TrayController(store, on_show_manager=show_manager)
+    def setup_tray() -> bool:
+        """Create indicator after main loop is running so the panel is ready (idle_add callback)."""
+        tray = TrayController(store, on_show_manager=show_manager)
+        tray_ref.append(tray)
+        if not store.load().profiles:
+            GLib.idle_add(show_manager)
+        return False  # one-shot
 
-    # Optional: if no profiles, open manager so user can add one
-    if not store.load().profiles:
-        GLib.idle_add(show_manager)
-
+    GLib.idle_add(setup_tray)
     Gtk.main()
 
 
