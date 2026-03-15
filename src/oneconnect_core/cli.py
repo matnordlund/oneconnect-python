@@ -39,7 +39,7 @@ def main() -> None:
     disconnect.set_defaults(use_nm=None)
 
     status = sub.add_parser("status")
-    status.add_argument("name", help="Profile name to check for an active tunnel")
+    status.add_argument("name", nargs="?", default=None, help="Profile name to check; if omitted, show status for all profiles")
 
     args = parser.parse_args()
     store = ProfileStore()
@@ -78,18 +78,25 @@ def main() -> None:
         return
 
     if args.cmd == "status":
-        profile = store.get_by_name(args.name)
-        if not profile:
-            raise SystemExit(f"Profile not found: {args.name}")
-        info = get_tunnel_status(profile)
-        if info is None:
-            print("Not connected")
+        if args.name is not None:
+            profile = store.get_by_name(args.name)
+            if not profile:
+                raise SystemExit(f"Profile not found: {args.name}")
+            profiles = [profile]
         else:
-            ip = info.get("connection_ip")
-            if ip:
-                print(f"Connected using IP {ip}")
+            data = store.load()
+            profiles = data.profiles
+        for p in profiles:
+            info = get_tunnel_status(p)
+            name = p.name or p.id[:12]
+            if info is None:
+                print(f"{name}: Not connected")
             else:
-                print("Connected (tunnel active; see log for details)")
+                ip = info.get("connection_ip")
+                if ip:
+                    print(f"{name}: Connected using IP {ip}")
+                else:
+                    print(f"{name}: Connected (tunnel active; see log for details)")
         return
 
     if args.cmd == "connect":

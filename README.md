@@ -151,9 +151,10 @@ Connect without `pkexec`:
 oneconnect connect Demo --no-pkexec
 ```
 
-Status (direct backend: checks pid file and parses log for connection IP):
+Status (direct backend: checks pid file and parses log for connection IP; omit profile to show all):
 
 ```bash
+oneconnect status
 oneconnect status Demo
 ```
 
