@@ -11,7 +11,8 @@ try:
     import gi
     gi.require_version("Gtk", "3.0")
     gi.require_version("Gdk", "3.0")
-    from gi.repository import Gdk, GLib, Gtk
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
     # Prefer Ayatana (Ubuntu/Debian), fall back to older AppIndicator3 (some distros)
     try:
         gi.require_version("AyatanaAppIndicator3", "0.1")
@@ -31,14 +32,72 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from oneconnect_core.clavister import obtain_webvpn_secrets, SessionSecrets
-from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
+from oneconnect_core.profiles import AVConfig, CONFIG_DIR, Profile, ProfileStore
 from oneconnect_core.runner import get_backend
 from oneconnect_core.openconnect_runner import get_openconnect_log_file_path, get_tunnel_status
 
 INDICATOR_ID = "oneconnect"
-# Use the same icon in both states so the tray icon stays visible (some themes hide emblem-default-symbolic)
 ICON_DISCONNECTED = "network-vpn-symbolic"
-ICON_CONNECTED = "network-vpn-symbolic"
+TRAY_ICON_SIZE = 22
+# Green tint for "connected" state (RGBA-ish: used to tint the symbolic icon)
+GREEN_TINT = (0x2e, 0xcc, 0x71)  # Yaru success-style green
+
+_connected_icon_path: str | None = None
+
+
+def _green_tinted_icon_path() -> str | None:
+    """Create a green-tinted tray icon and return its path, or None on failure."""
+    global _connected_icon_path
+    theme = Gtk.IconTheme.get_default()
+    try:
+        pixbuf = theme.load_icon(ICON_DISCONNECTED, TRAY_ICON_SIZE, 0)
+    except Exception:
+        return None
+    if pixbuf is None:
+        return None
+    w = pixbuf.get_width()
+    h = pixbuf.get_height()
+    has_alpha = pixbuf.get_has_alpha()
+    n_channels = pixbuf.get_n_channels()
+    rowstride = pixbuf.get_rowstride()
+    pixels = pixbuf.get_pixels()
+    if not pixels:
+        return None
+    # New buffer: same layout (keep rowstride), RGB = green scaled by alpha
+    new_data = bytearray(pixels)
+    r, g, b = GREEN_TINT
+    for y in range(h):
+        for x in range(w):
+            i = y * rowstride + x * n_channels
+            if has_alpha and n_channels >= 4:
+                a = pixels[i + 3]
+            else:
+                a = 255
+            new_data[i] = int(r * a / 255)
+            new_data[i + 1] = int(g * a / 255)
+            new_data[i + 2] = int(b * a / 255)
+            if n_channels >= 4:
+                new_data[i + 3] = a
+    try:
+        new_pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(
+            GLib.Bytes.new(bytes(new_data)),
+            GdkPixbuf.Colorspace.RGB,
+            has_alpha,
+            8,
+            w,
+            h,
+            rowstride,
+        )
+    except Exception:
+        return None
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    path = CONFIG_DIR / "tray-connected.png"
+    try:
+        new_pixbuf.savev(str(path), "png", [], [])
+    except Exception:
+        return None
+    _connected_icon_path = str(path)
+    return _connected_icon_path
 
 
 def _find_connected_profile(store: ProfileStore):
@@ -90,7 +149,11 @@ class TrayController:
         profiles = self.store.load().profiles
 
         if connected:
-            self.indicator.set_icon_full(ICON_CONNECTED, "icon")
+            green_path = _green_tinted_icon_path()
+            if green_path:
+                self.indicator.set_icon(green_path)
+            else:
+                self.indicator.set_icon_full(ICON_DISCONNECTED, "icon")
             name = connected.name or connected.id[:12]
             lab = Gtk.MenuItem(label=f"Connected: {name}")
             lab.set_sensitive(False)
