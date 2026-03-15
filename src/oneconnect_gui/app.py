@@ -10,6 +10,7 @@ from pathlib import Path
 try:
     import gi
     gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
     from gi.repository import Gdk, GLib, Gtk
     # Prefer Ayatana (Ubuntu/Debian), fall back to older AppIndicator3 (some distros)
     try:
