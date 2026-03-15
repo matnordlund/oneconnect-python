@@ -245,7 +245,7 @@ class TrayController:
         self.indicator = AppIndicator.Indicator.new(
             INDICATOR_ID,
             ICON_DISCONNECTED,
-            AppIndicator.IndicatorCategory.SYSTEM_SERVICES,
+            AppIndicator.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self._menu = Gtk.Menu()
@@ -430,12 +430,15 @@ class ProfileManagerWindow(Gtk.Window):
         self.on_refresh_tray = on_refresh_tray
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=12)
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.connect_btn = Gtk.Button(label="Connect", image=Gtk.Image.new_from_icon_name("network-connect-symbolic", Gtk.IconSize.BUTTON))
+        self.connect_btn.connect("clicked", self._on_connect)
         add_btn = Gtk.Button(label="Add", image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON))
         add_btn.connect("clicked", self._on_add)
         edit_btn = Gtk.Button(label="Edit", image=Gtk.Image.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.BUTTON))
         edit_btn.connect("clicked", self._on_edit)
         delete_btn = Gtk.Button(label="Delete", image=Gtk.Image.new_from_icon_name("user-trash-symbolic", Gtk.IconSize.BUTTON))
         delete_btn.connect("clicked", self._on_delete)
+        toolbar.pack_start(self.connect_btn, False, False, 0)
         toolbar.pack_start(add_btn, False, False, 0)
         toolbar.pack_start(edit_btn, False, False, 0)
         toolbar.pack_start(delete_btn, False, False, 0)
@@ -445,6 +448,15 @@ class ProfileManagerWindow(Gtk.Window):
         self.listbox.connect("row-activated", self._on_activated)
         scroll.add(self.listbox)
         box.pack_start(scroll, True, True, 0)
+        hint = Gtk.Label(
+            label="Select a profile and click Connect (or double-click). If the tray icon is missing, enable "
+            "'AppIndicator and KStatusNotifierItem Support' in GNOME Extensions.",
+            wrap=True,
+            xalign=0,
+            margin_top=8,
+        )
+        hint.get_style_context().add_class("dim-label")
+        box.pack_start(hint, False, False, 0)
         self.add(box)
         self._fill()
         self.connect("destroy", self._on_destroy)
@@ -469,7 +481,24 @@ class ProfileManagerWindow(Gtk.Window):
         return getattr(row, "profile", None) if row else None
 
     def _on_activated(self, _lb: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
-        self._on_edit(None)
+        self._on_connect(None)
+
+    def _on_connect(self, _btn: Gtk.Button | None) -> None:
+        p = self._selected_profile()
+        if not p:
+            return
+        self.connect_btn.set_sensitive(False)
+
+        def run() -> None:
+            async def do_connect() -> None:
+                backend = get_backend(use_networkmanager=False, use_pkexec=True)
+                secrets = await obtain_webvpn_secrets(p, log=lambda m: None)
+                await backend.connect(p, secrets, log=lambda m: None)
+            asyncio.run(do_connect())
+            GLib.idle_add(lambda: self.connect_btn.set_sensitive(True))
+            if self.on_refresh_tray:
+                GLib.idle_add(self.on_refresh_tray)
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_add(self, _btn: Gtk.Button) -> None:
         dlg = ProfileEditDialog(self, None, on_save=self._saved)
@@ -538,8 +567,9 @@ def main() -> None:
         """Create indicator after main loop is running so the panel is ready (idle_add callback)."""
         tray = TrayController(store, on_show_manager=show_manager)
         tray_ref.append(tray)
-        if not store.load().profiles:
-            GLib.idle_add(show_manager)
+        # Always show the profile manager so the app is usable if the tray icon doesn't appear
+        # (e.g. on Ubuntu/GNOME without the AppIndicator extension)
+        GLib.idle_add(show_manager)
         return False  # one-shot
 
     GLib.idle_add(setup_tray)
