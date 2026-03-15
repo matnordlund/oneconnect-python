@@ -229,13 +229,17 @@ class TrayController:
         self._menu = Gtk.Menu()
         self._connect_submenu = None
         self._building = False
+        self._last_connected_id: str | None = None
         self.refresh_menu()
         # Poll connection state so tray stays in sync if user connects/disconnects via CLI
         GLib.timeout_add_seconds(2, self._poll_connection_state)
 
     def _poll_connection_state(self) -> bool:
-        """Called periodically; refresh tray so CLI connect/disconnect is reflected. Return True to keep polling."""
-        self.refresh_menu()
+        """Called periodically; refresh tray only when connection state actually changed. Return True to keep polling."""
+        connected = _find_connected_profile(self.store)
+        current_id = connected.id if connected else None
+        if current_id != self._last_connected_id:
+            self.refresh_menu()
         return True
 
     def refresh_menu(self) -> None:
@@ -247,6 +251,7 @@ class TrayController:
             self._menu.remove(c)
         connected = _find_connected_profile(self.store)
         profiles = self.store.load().profiles
+        self._last_connected_id = connected.id if connected else None
 
         if connected:
             green_path = _green_tinted_icon_path()
