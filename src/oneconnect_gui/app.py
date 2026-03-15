@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import threading
@@ -12,7 +13,8 @@ try:
     gi.require_version("Gtk", "3.0")
     gi.require_version("Gdk", "3.0")
     gi.require_version("GdkPixbuf", "2.0")
-    from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
+    gi.require_version("Pango", "1.0")
+    from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
     # Prefer Ayatana (Ubuntu/Debian), fall back to older AppIndicator3 (some distros)
     try:
         gi.require_version("AyatanaAppIndicator3", "0.1")
@@ -108,15 +110,106 @@ def _find_connected_profile(store: ProfileStore):
     return None
 
 
-def _open_log(profile: Profile) -> None:
-    path = get_openconnect_log_file_path(profile)
-    if not path.exists():
+# ---------------------------------------------------------------------------
+# Log viewer window: terminal-style tail -f
+# ---------------------------------------------------------------------------
+
+class LogViewerWindow(Gtk.Window):
+    """Terminal-style window showing tail -f of the profile log file."""
+
+    def __init__(self, profile: Profile) -> None:
+        path = get_openconnect_log_file_path(profile)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
-    try:
-        subprocess.run(["xdg-open", str(path)], check=False, timeout=5)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        if not path.exists():
+            path.touch()
+        name = profile.name or profile.id[:12]
+        super().__init__(title=f"Log: {name}")
+        self.set_default_size(700, 400)
+        self._path = path
+        self._proc: subprocess.Popen | None = None
+        self._watch_id: int | None = None
+
+        # Terminal-like styling
+        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0.15, 0.15, 0.15, 1.0))
+        scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+        )
+        self._text = Gtk.TextView(
+            editable=False,
+            cursor_visible=False,
+            wrap_mode=Gtk.WrapMode.CHAR,
+            left_margin=8,
+            right_margin=8,
+            top_margin=8,
+            bottom_margin=8,
+        )
+        self._text.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0.9, 0.9, 0.9, 1.0))
+        fd = Pango.FontDescription.from_string("Monospace 10")
+        self._text.override_font(fd)
+        self._buffer = self._text.get_buffer()
+        scroll.add(self._text)
+        self.add(scroll)
+
+        self.connect("destroy", self._on_destroy)
+        self.show_all()
+
+        try:
+            self._proc = subprocess.Popen(
+                ["tail", "-f", "-n", "500", str(path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,
+            )
+        except FileNotFoundError:
+            self._buffer.set_text("tail command not found.")
+            return
+        if self._proc.stdout is None:
+            return
+        self._watch_id = GLib.io_add_watch(
+            self._proc.stdout.fileno(),
+            GLib.IO_IN,
+            self._on_stdout,
+        )
+
+    def _on_stdout(self, _source: int, _condition: int) -> bool:
+        if self._proc is None or self._proc.stdout is None:
+            return False
+        try:
+            data = os.read(self._proc.stdout.fileno(), 4096)
+        except OSError:
+            return False
+        if not data:
+            return False
+        try:
+            text = data.decode("utf-8", errors="replace")
+        except Exception:
+            return True
+        end = self._buffer.get_end_iter()
+        self._buffer.insert(end, text)
+        # Scroll to end
+        self._text.scroll_to_iter(self._buffer.get_end_iter(), 0, False, 0, 0)
+        return True
+
+    def _on_destroy(self, _window: Gtk.Window) -> None:
+        if self._watch_id is not None:
+            GLib.source_remove(self._watch_id)
+            self._watch_id = None
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
+
+
+def _open_log(profile: Profile) -> None:
+    """Open a terminal-style window that tails the profile log file."""
+    LogViewerWindow(profile)
 
 
 # ---------------------------------------------------------------------------
