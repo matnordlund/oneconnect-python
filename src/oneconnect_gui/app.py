@@ -36,8 +36,9 @@ from oneconnect_core.runner import get_backend
 from oneconnect_core.openconnect_runner import get_openconnect_log_file_path, get_tunnel_status
 
 INDICATOR_ID = "oneconnect"
+# Use the same icon in both states so the tray icon stays visible (some themes hide emblem-default-symbolic)
 ICON_DISCONNECTED = "network-vpn-symbolic"
-ICON_CONNECTED = "emblem-default-symbolic"
+ICON_CONNECTED = "network-vpn-symbolic"
 
 
 def _find_connected_profile(store: ProfileStore):
