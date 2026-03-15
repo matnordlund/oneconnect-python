@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shlex
 import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
-from .profiles import Profile
+from .profiles import CONFIG_DIR, Profile
 
 
 class OpenConnectLaunchError(RuntimeError):
     pass
+
+
+def get_openconnect_pid_file_path(profile: Profile) -> Path:
+    """Stable path for the openconnect daemon PID file for this profile."""
+    name = (profile.name or "").strip()
+    if name:
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-")
+        if slug:
+            return CONFIG_DIR / f"openconnect-{slug[:64]}.pid"
+    return CONFIG_DIR / f"openconnect-{profile.id[:12]}.pid"
 
 
 def _find_openconnect() -> str | None:
@@ -61,13 +72,28 @@ def _build_match_pattern(profile: Profile, exe: str) -> str:
 async def disconnect_openconnect(
     root_pid: int | None,
     profile: Profile | None = None,
+    pid_file: Optional[Path] = None,
     log: Optional[Callable[[str], None]] = None,
     use_pkexec: bool = True,
 ) -> int:
     log = log or (lambda msg: None)
 
-    if root_pid:
-        base_cmd = [_find_kill(), "-TERM", str(root_pid)]
+    pid_to_kill: int | None = root_pid
+    if pid_to_kill is None and profile is not None:
+        path = pid_file if pid_file is not None else get_openconnect_pid_file_path(profile)
+        if path.exists():
+            try:
+                pid_to_kill = int(path.read_text().strip())
+            except (ValueError, OSError):
+                pid_to_kill = None
+            if pid_to_kill is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    if pid_to_kill is not None:
+        base_cmd = [_find_kill(), "-TERM", str(pid_to_kill)]
     else:
         if not profile:
             raise OpenConnectLaunchError("No active OpenConnect PID is available for disconnect")
@@ -96,6 +122,15 @@ async def disconnect_openconnect(
     return await proc.wait()
 
 
+def _current_username() -> str:
+    """Return the username of the current (invoking) user for --setuid."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError):
+        return os.environ.get("USER", "nobody")
+
+
 async def run_openconnect(
     profile: Profile,
     cookie: str,
@@ -122,16 +157,22 @@ async def run_openconnect(
         base_args.append(f"--servercert={profile.servercert}")
     base_args.extend(profile.extra_openconnect_args)
 
+    pid_file_path: Path | None = None
+    if use_pkexec:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        pid_file_path = get_openconnect_pid_file_path(profile)
+        base_args.append("--background")
+        base_args.append(f"--pid-file={pid_file_path}")
+        base_args.append(f"--setuid={_current_username()}")
+
     if use_pkexec:
         pkexec = _find_pkexec()
         if not pkexec:
             raise OpenConnectLaunchError("pkexec requested but not found in PATH")
         mkdir_bin = _find_mkdir()
         quoted_base = " ".join(_shell_quote(arg) for arg in base_args)
-        shell_cmd = (
-            f'exec {quoted_base}'
-        )
-        cmd = [pkexec, "/bin/sh", "-c", f'{_shell_quote(mkdir_bin)} -p /var/run/vpnc && {shell_cmd}']
+        shell_cmd = f"exec {quoted_base}"
+        cmd = [pkexec, "/bin/sh", "-c", f"{_shell_quote(mkdir_bin)} -p /var/run/vpnc && {shell_cmd}"]
     else:
         cmd = base_args
 
@@ -145,7 +186,6 @@ async def run_openconnect(
     if proc_holder is not None:
         try:
             proc_holder.current_proc = proc
-            # Expose the root PID so UIs can disconnect reliably later.
             proc_holder.root_pid = proc.pid
         except Exception:
             pass
@@ -162,7 +202,13 @@ async def run_openconnect(
     if proc_holder is not None:
         try:
             proc_holder.current_proc = None
-            proc_holder.root_pid = None
+            if pid_file_path is not None and pid_file_path.exists():
+                try:
+                    proc_holder.root_pid = int(pid_file_path.read_text().strip())
+                except (ValueError, OSError):
+                    proc_holder.root_pid = None
+            else:
+                proc_holder.root_pid = None
         except Exception:
             pass
     return rc
