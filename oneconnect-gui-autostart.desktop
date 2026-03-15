@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OneConnect
+Comment=OneConnect VPN tray (Clavister NetWall + OpenConnect)
+Exec=oneconnect-gui
+Icon=network-vpn-symbolic
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

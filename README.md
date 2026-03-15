@@ -123,6 +123,27 @@ The GUI is systray-first and uses the system theme (e.g. Yaru on Ubuntu, includi
 - **Tray icon on Ubuntu/GNOME:** Install the AppIndicator extension and enable AppIndicators so the tray icon appears: `sudo apt install gnome-shell-extension-appindicator`. Then open **Extensions** (or GNOME Tweaks), find **AppIndicator and KStatusNotifierItem Support** (or **Ubuntu AppIndicators**), and turn it **on**. Without this, the tray icon will not show; you can still run `oneconnect-gui --manage-profiles` to use the profile manager window.
 - **Dependencies:** GTK3 and an app indicator. The GUI tries Ayatana first, then the older AppIndicator3, so it works with either. On Ubuntu/Debian: `apt install gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1` (or on older distros: `gir1.2-appindicator3-0.1`). Install the matching library if needed (e.g. `libayatana-appindicator3-1`). The GUI needs the `gi` module (PyGObject). In a normal venv, `gi` is usually not installed (it is provided by the system package `python3-gi`). Either: (1) install system packages and run the GUI with system Python: `sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1` then `python3 -m oneconnect_gui.app`; or (2) create the venv with `python3 -m venv .venv --system-site-packages` so the venv can use the system's `python3-gi`. The GUI will then prepend system typelib paths so the indicator is found. The GUI uses the direct OpenConnect backend only (no NetworkManager option in the tray). You may see a deprecation warning from libayatana-appindicator at startup; it is harmless.
 
+**Start at login (Debian/Ubuntu):** Copy the included autostart desktop file into your user autostart directory so the tray starts when you log in:
+
+```bash
+mkdir -p ~/.config/autostart
+cp oneconnect-gui-autostart.desktop ~/.config/autostart/
+```
+
+If `oneconnect-gui` is not on your session PATH (typical when using a venv), edit the copied file and set `Exec` to the full path to the executable, for example:
+
+```ini
+Exec=/home/you/oneconnect-python/.venv/bin/oneconnect-gui
+```
+
+To open the profile manager at login as well, use:
+
+```ini
+Exec=/home/you/oneconnect-python/.venv/bin/oneconnect-gui --manage-profiles
+```
+
+Log out and back in (or reboot) to test. To disable, remove the file from `~/.config/autostart/` or set `X-GNOME-Autostart-enabled=false` inside it.
+
 ## CLI examples
 
 Add a profile:
