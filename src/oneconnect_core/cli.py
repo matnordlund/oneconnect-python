@@ -1,4 +1,4 @@
-"""CLI entry point for OneConnect (list, add-profile, connect, disconnect)."""
+"""CLI entry point for OneConnect (list, add-profile, connect, disconnect, status)."""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +7,7 @@ import json
 
 from oneconnect_core.clavister import obtain_webvpn_cookie, obtain_webvpn_secrets, SessionSecrets
 from oneconnect_core.config import get_use_networkmanager
+from oneconnect_core.openconnect_runner import get_tunnel_status
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
 from oneconnect_core.runner import get_backend
 
@@ -36,6 +37,9 @@ def main() -> None:
     disconnect.add_argument("--nm", "--network-manager", dest="use_nm", action="store_true", help="Use NetworkManager to disconnect")
     disconnect.add_argument("--no-nm", dest="use_nm", action="store_false", help="Disconnect direct openconnect (default)")
     disconnect.set_defaults(use_nm=None)
+
+    status = sub.add_parser("status")
+    status.add_argument("name", help="Profile name to check for an active tunnel")
 
     args = parser.parse_args()
     store = ProfileStore()
@@ -71,6 +75,21 @@ def main() -> None:
             rc = await backend.disconnect(profile, root_pid=None, log=print)
             raise SystemExit(rc)
         asyncio.run(run_disconnect())
+        return
+
+    if args.cmd == "status":
+        profile = store.get_by_name(args.name)
+        if not profile:
+            raise SystemExit(f"Profile not found: {args.name}")
+        info = get_tunnel_status(profile)
+        if info is None:
+            print("Not connected")
+        else:
+            ip = info.get("connection_ip")
+            if ip:
+                print(f"Connected using IP {ip}")
+            else:
+                print("Connected (tunnel active; see log for details)")
         return
 
     if args.cmd == "connect":

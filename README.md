@@ -16,7 +16,7 @@ pip install -e .
 
 Then run the CLI or GUI with the venv active:
 
-- `oneconnect` — CLI (list, add-profile, connect, disconnect)
+- `oneconnect` — CLI (list, add-profile, connect, disconnect, status)
 - `oneconnect-gui` — GTK profile picker and connection UI
 
 To leave the venv: `deactivate`. To use the app again later: `cd oneconnect-python && source .venv/bin/activate`, then `oneconnect` or `oneconnect-gui`.
@@ -149,6 +149,12 @@ Connect without `pkexec`:
 
 ```bash
 oneconnect connect Demo --no-pkexec
+```
+
+Status (direct backend: checks pid file and parses log for connection IP):
+
+```bash
+oneconnect status Demo
 ```
 
 Disconnect:

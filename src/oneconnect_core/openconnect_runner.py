@@ -10,6 +10,14 @@ from typing import Callable, Optional
 
 from .profiles import CONFIG_DIR, Profile
 
+# Lines that indicate a successful connection; we look for these + an IPv4 address in the log
+_CONNECTED_PATTERN = re.compile(
+    r"connected\s+(?:to|as)\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
+    re.IGNORECASE,
+)
+# Fallback: any line with "connected" and an IPv4 somewhere
+_IPV4_IN_LINE = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})")
+
 
 class OpenConnectLaunchError(RuntimeError):
     pass
@@ -33,6 +41,55 @@ def get_openconnect_pid_file_path(profile: Profile) -> Path:
 def get_openconnect_log_file_path(profile: Profile) -> Path:
     """Stable path for the openconnect daemon log file for this profile."""
     return CONFIG_DIR / f"openconnect-{_profile_slug(profile)}.log"
+
+
+def _pid_running(pid: int) -> bool:
+    """Return True if the process with the given PID exists and is running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _parse_connected_ip_from_log(log_path: Path) -> Optional[str]:
+    """Read the log file and return the most recent 'Connected ... IP' if found."""
+    if not log_path.exists():
+        return None
+    last_ip: Optional[str] = None
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = _CONNECTED_PATTERN.search(line)
+                if m:
+                    last_ip = m.group(1)
+                    continue
+                if "connected" in line.lower():
+                    m = _IPV4_IN_LINE.search(line)
+                    if m:
+                        last_ip = m.group(1)
+    except OSError:
+        return None
+    return last_ip
+
+
+def get_tunnel_status(profile: Profile) -> Optional[dict]:
+    """
+    If this profile has an active tunnel (pid file present and process running),
+    return a dict with 'pid' and 'connection_ip' (parsed from the log). Otherwise None.
+    """
+    pid_path = get_openconnect_pid_file_path(profile)
+    if not pid_path.exists():
+        return None
+    try:
+        pid = int(pid_path.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    if not _pid_running(pid):
+        return None
+    log_path = get_openconnect_log_file_path(profile)
+    connection_ip = _parse_connected_ip_from_log(log_path)
+    return {"pid": pid, "connection_ip": connection_ip}
 
 
 def _find_openconnect() -> str | None:
