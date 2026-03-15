@@ -8,6 +8,19 @@ import sys
 import threading
 from pathlib import Path
 
+# On Linux, help venv find system typelibs (Ubuntu/Debian often need this)
+if sys.platform == "linux":
+    _gipath = [p for p in os.environ.get("GI_TYPELIB_PATH", "").split(os.pathsep) if p]
+    for _d in (
+        "/usr/lib/x86_64-linux-gnu/girepository-1.0",
+        "/usr/lib/aarch64-linux-gnu/girepository-1.0",
+        "/usr/lib/girepository-1.0",
+    ):
+        if os.path.isdir(_d) and _d not in _gipath:
+            _gipath.insert(0, _d)
+    if _gipath:
+        os.environ["GI_TYPELIB_PATH"] = os.pathsep.join(_gipath)
+
 try:
     import gi
     gi.require_version("Gtk", "3.0")
@@ -25,8 +38,8 @@ try:
 except (ValueError, ImportError) as exc:
     raise SystemExit(
         "PyGObject with Gtk 3.0 and an app indicator are required.\n"
-        "Install one of: gir1.2-ayatanaappindicator3-0.1 (Ubuntu/Debian) or "
-        "gir1.2-appindicator3-0.1 (older distros). Also: gir1.2-gtk-3.0."
+        "Install: gir1.2-gtk-3.0 and one of gir1.2-ayatanaappindicator3-0.1 or gir1.2-appindicator3-0.1.\n"
+        f"Error: {exc}"
     ) from exc
 
 SRC = Path(__file__).resolve().parents[1]
