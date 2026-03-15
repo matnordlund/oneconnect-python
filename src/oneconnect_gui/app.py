@@ -10,13 +10,19 @@ from pathlib import Path
 try:
     import gi
     gi.require_version("Gtk", "3.0")
-    gi.require_version("AyatanaAppIndicator3", "0.1")
-    from gi.repository import AyatanaAppIndicator3 as AppIndicator
     from gi.repository import Gdk, GLib, Gtk
+    # Prefer Ayatana (Ubuntu/Debian), fall back to older AppIndicator3 (some distros)
+    try:
+        gi.require_version("AyatanaAppIndicator3", "0.1")
+        from gi.repository import AyatanaAppIndicator3 as AppIndicator
+    except (ValueError, ImportError):
+        gi.require_version("AppIndicator3", "0.1")
+        from gi.repository import AppIndicator3 as AppIndicator
 except (ValueError, ImportError) as exc:
     raise SystemExit(
-        "PyGObject with Gtk 3.0 and AyatanaAppIndicator3 are required. "
-        "On Ubuntu: apt install gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1"
+        "PyGObject with Gtk 3.0 and an app indicator are required.\n"
+        "Install one of: gir1.2-ayatanaappindicator3-0.1 (Ubuntu/Debian) or "
+        "gir1.2-appindicator3-0.1 (older distros). Also: gir1.2-gtk-3.0."
     ) from exc
 
 SRC = Path(__file__).resolve().parents[1]
