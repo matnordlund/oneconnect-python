@@ -69,7 +69,7 @@ This project consists of:
   - `OperatingSystemArchitecture`: `uname -m`
   - `OperatingSystemInformation`: `/etc/os-release` `PRETTY_NAME`, else `uname -o`
 - Supports `pkexec` for privileged OpenConnect launch/disconnect
-- When using pkexec (default), the direct backend runs OpenConnect with `--background`, writes a per-profile PID file under `~/.config/oneconnect/` (e.g. `openconnect-Demo.pid`), and uses `--setuid` so the daemon runs as the user who invoked the CLI; disconnect then uses the PID file to terminate the correct process
+- When using pkexec (default), the direct backend runs OpenConnect with `--background`, writes a per-profile PID file under `~/.config/oneconnect/` (e.g. `openconnect-Demo.pid`), and uses `--setuid` so the daemon runs as the user who invoked the CLI; connection output is appended to `openconnect-<profile>.log` in the same directory; disconnect uses the PID file to terminate the correct process and does not require pkexec (the daemon runs as your user)
 
 ## Profile storage
 

@@ -15,14 +15,24 @@ class OpenConnectLaunchError(RuntimeError):
     pass
 
 
-def get_openconnect_pid_file_path(profile: Profile) -> Path:
-    """Stable path for the openconnect daemon PID file for this profile."""
+def _profile_slug(profile: Profile) -> str:
+    """Stable short identifier for this profile (used in pid/log filenames)."""
     name = (profile.name or "").strip()
     if name:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-")
         if slug:
-            return CONFIG_DIR / f"openconnect-{slug[:64]}.pid"
-    return CONFIG_DIR / f"openconnect-{profile.id[:12]}.pid"
+            return slug[:64]
+    return profile.id[:12]
+
+
+def get_openconnect_pid_file_path(profile: Profile) -> Path:
+    """Stable path for the openconnect daemon PID file for this profile."""
+    return CONFIG_DIR / f"openconnect-{_profile_slug(profile)}.pid"
+
+
+def get_openconnect_log_file_path(profile: Profile) -> Path:
+    """Stable path for the openconnect daemon log file for this profile."""
+    return CONFIG_DIR / f"openconnect-{_profile_slug(profile)}.log"
 
 
 def _find_openconnect() -> str | None:
@@ -170,9 +180,11 @@ async def run_openconnect(
         if not pkexec:
             raise OpenConnectLaunchError("pkexec requested but not found in PATH")
         mkdir_bin = _find_mkdir()
+        log_file_path = get_openconnect_log_file_path(profile)
         quoted_base = " ".join(_shell_quote(arg) for arg in base_args)
-        # Redirect stdout/stderr so the backgrounded daemon doesn't keep our pipe open
-        shell_cmd = f"exec {quoted_base} >/dev/null 2>&1"
+        # Redirect to log file so the backgrounded daemon doesn't keep our pipe open
+        quoted_log = _shell_quote(str(log_file_path))
+        shell_cmd = f"exec {quoted_base} >>{quoted_log} 2>&1"
         cmd = [pkexec, "/bin/sh", "-c", f"{_shell_quote(mkdir_bin)} -p /var/run/vpnc && {shell_cmd}"]
     else:
         cmd = base_args

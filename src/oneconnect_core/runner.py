@@ -59,11 +59,12 @@ class DirectBackend:
         log: Optional[Callable[[str], None]] = None,
     ) -> int:
         from .openconnect_runner import disconnect_openconnect
+        # Daemon runs as the invoking user (--setuid), so no pkexec needed to kill it
         return await disconnect_openconnect(
             root_pid,
             profile=profile,
             log=log,
-            use_pkexec=self.use_pkexec,
+            use_pkexec=False,
         )
 
 
