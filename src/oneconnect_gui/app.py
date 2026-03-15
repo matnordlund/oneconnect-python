@@ -341,7 +341,7 @@ class ProfileEditDialog(Gtk.Dialog):
         super().__init__(title=title, transient_for=parent, modal=True)
         self.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
         self.set_default_response(Gtk.ResponseType.OK)
-        self.set_default_size(440, 280)
+        self.set_default_size(440, 160)
         self.set_resizable(True)
         self._profile = profile
         self._on_save = on_save
@@ -361,16 +361,6 @@ class ProfileEditDialog(Gtk.Dialog):
         self.e_server = Gtk.Entry(hexpand=True)
         self.e_server.set_text((profile.server_uri or "") if profile else "")
         grid.attach(self.e_server, 1, row, 1, 1)
-        row += 1
-        grid.attach(Gtk.Label(label="Username:", halign=Gtk.Align.END, valign=Gtk.Align.CENTER), 0, row, 1, 1)
-        self.e_username = Gtk.Entry(hexpand=True)
-        self.e_username.set_text((profile.username or "user") if profile else "user")
-        grid.attach(self.e_username, 1, row, 1, 1)
-        row += 1
-        grid.attach(Gtk.Label(label="Device seed:", halign=Gtk.Align.END, valign=Gtk.Align.CENTER), 0, row, 1, 1)
-        self.e_device = Gtk.Entry(hexpand=True)
-        self.e_device.set_text((profile.device_seed or "linux-device") if profile else "linux-device")
-        grid.attach(self.e_device, 1, row, 1, 1)
         box.pack_start(grid, True, True, 0)
         box.show_all()
         self.connect("response", self._on_response)
@@ -382,15 +372,13 @@ class ProfileEditDialog(Gtk.Dialog):
         server = self.e_server.get_text().strip()
         if not name or not server:
             return
-        username = self.e_username.get_text().strip() or "user"
-        device = self.e_device.get_text().strip() or "linux-device"
         if self._profile:
             p = Profile(
                 id=self._profile.id,
                 name=name,
                 server_uri=server,
-                username=username,
-                device_seed=device,
+                username=self._profile.username,
+                device_seed=self._profile.device_seed,
                 openconnect_server=self._profile.openconnect_server,
                 servercert=self._profile.servercert,
                 useragent=self._profile.useragent,
@@ -399,13 +387,7 @@ class ProfileEditDialog(Gtk.Dialog):
                 av=AVConfig(**__import__("dataclasses").asdict(self._profile.av)),
             )
         else:
-            p = Profile(
-                name=name,
-                server_uri=server,
-                username=username,
-                device_seed=device,
-                av=AVConfig(),
-            )
+            p = Profile(name=name, server_uri=server, av=AVConfig())
         if self._on_save:
             self._on_save(p)
 

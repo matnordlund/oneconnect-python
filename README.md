@@ -120,7 +120,7 @@ The script is expected to return exit code `0` on success.
 The GUI is systray-first and uses the system theme (e.g. Yaru on Ubuntu, including dark/light):
 
 - **System tray (Ayatana AppIndicator):** One icon in the panel; menu lists all configured profiles. Select “Connect to” → &lt;profile&gt; to connect. When connected, the icon changes, and the menu shows “Connected: &lt;name&gt;”, “Disconnect”, and “View log” (opens the tunnel log file in your default editor).
-- **Profile manager:** Open “Manage profiles” from the tray to add, edit, and delete profiles (name, NetWall server URI, username, device seed). If you start the GUI with no profiles, the manager window opens so you can add one.
+- **Profile manager:** Open “Manage profiles” from the tray to add, edit, and delete profiles (name and NetWall server URI). If you start the GUI with no profiles, the manager window opens so you can add one.
 - **Dependencies:** GTK3 and an app indicator. The GUI tries Ayatana first, then the older AppIndicator3, so it works with either. On Ubuntu/Debian: `apt install gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1` (or on older distros: `gir1.2-appindicator3-0.1`). Install the matching library if needed (e.g. `libayatana-appindicator3-1`). The GUI uses the direct OpenConnect backend only (no NetworkManager option in the tray). You may see a deprecation warning from libayatana-appindicator at startup; it is harmless. The recommended replacement (libayatana-appindicator-glib) uses a different API and is not yet used here. *Using `pip install --no-build-isolation` only affects how the project is built; it does not change whether the GUI finds the system indicator—that depends on having the correct gir package installed.*
 
 ## CLI examples

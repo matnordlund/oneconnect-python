@@ -21,8 +21,6 @@ def main() -> None:
     add = sub.add_parser("add-profile")
     add.add_argument("--name", required=True)
     add.add_argument("--server-uri", required=True)
-    add.add_argument("--username", default="user")
-    add.add_argument("--device-seed", default="linux-device")
 
     connect = sub.add_parser("connect")
     connect.add_argument("name")
@@ -47,7 +45,7 @@ def main() -> None:
     if args.cmd == "list":
         data = store.load()
         print(json.dumps([
-            {"id": p.id, "name": p.name, "server_uri": p.server_uri, "username": p.username}
+            {"id": p.id, "name": p.name, "server_uri": p.server_uri}
             for p in data.profiles
         ], indent=2))
         return
@@ -56,8 +54,6 @@ def main() -> None:
         profile = Profile(
             name=args.name,
             server_uri=args.server_uri,
-            username=args.username,
-            device_seed=args.device_seed,
             av=AVConfig(),
         )
         store.upsert_profile(profile)
