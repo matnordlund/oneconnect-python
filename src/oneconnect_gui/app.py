@@ -341,31 +341,38 @@ class ProfileEditDialog(Gtk.Dialog):
         super().__init__(title=title, transient_for=parent, modal=True)
         self.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
         self.set_default_response(Gtk.ResponseType.OK)
+        self.set_default_size(440, 280)
+        self.set_resizable(True)
         self._profile = profile
         self._on_save = on_save
         box = self.get_content_area()
-        grid = Gtk.Grid(column_spacing=12, row_spacing=12, margin=18)
+        box.set_border_width(12)
+        box.set_spacing(12)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=10)
+        grid.set_vexpand(True)
+        grid.set_hexpand(True)
         row = 0
-        grid.attach(Gtk.Label(label="Profile name:", halign=Gtk.Align.END), 0, row, 1, 1)
+        grid.attach(Gtk.Label(label="Profile name:", halign=Gtk.Align.END, valign=Gtk.Align.CENTER), 0, row, 1, 1)
         self.e_name = Gtk.Entry(hexpand=True)
         self.e_name.set_text((profile.name or "") if profile else "")
         grid.attach(self.e_name, 1, row, 1, 1)
         row += 1
-        grid.attach(Gtk.Label(label="NetWall server URI:", halign=Gtk.Align.END), 0, row, 1, 1)
+        grid.attach(Gtk.Label(label="NetWall server URI:", halign=Gtk.Align.END, valign=Gtk.Align.CENTER), 0, row, 1, 1)
         self.e_server = Gtk.Entry(hexpand=True)
         self.e_server.set_text((profile.server_uri or "") if profile else "")
         grid.attach(self.e_server, 1, row, 1, 1)
         row += 1
-        grid.attach(Gtk.Label(label="Username:", halign=Gtk.Align.END), 0, row, 1, 1)
+        grid.attach(Gtk.Label(label="Username:", halign=Gtk.Align.END, valign=Gtk.Align.CENTER), 0, row, 1, 1)
         self.e_username = Gtk.Entry(hexpand=True)
         self.e_username.set_text((profile.username or "user") if profile else "user")
         grid.attach(self.e_username, 1, row, 1, 1)
         row += 1
-        grid.attach(Gtk.Label(label="Device seed:", halign=Gtk.Align.END), 0, row, 1, 1)
+        grid.attach(Gtk.Label(label="Device seed:", halign=Gtk.Align.END, valign=Gtk.Align.CENTER), 0, row, 1, 1)
         self.e_device = Gtk.Entry(hexpand=True)
         self.e_device.set_text((profile.device_seed or "linux-device") if profile else "linux-device")
         grid.attach(self.e_device, 1, row, 1, 1)
-        box.add(grid)
+        box.pack_start(grid, True, True, 0)
+        box.show_all()
         self.connect("response", self._on_response)
 
     def _on_response(self, _dlg: Gtk.Dialog, resp: int) -> None:
