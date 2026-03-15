@@ -260,6 +260,9 @@ class TrayController:
             else:
                 self.indicator.set_icon_full(ICON_DISCONNECTED, "icon")
             name = connected.name or connected.id[:12]
+            info = get_tunnel_status(connected)
+            ip = (info or {}).get("connection_ip") if info else None
+            self.indicator.set_title(f"{name}: Connected, using IP {ip}" if ip else f"{name}: Connected")
             lab = Gtk.MenuItem(label=f"Connected: {name}")
             lab.set_sensitive(False)
             self._menu.append(lab)
@@ -273,6 +276,7 @@ class TrayController:
             self._menu.append(view_log)
         else:
             self.indicator.set_icon_full(ICON_DISCONNECTED, "icon")
+            self.indicator.set_title("Unconnected")
             connect_item = Gtk.MenuItem(label="Connect to")
             self._connect_submenu = Gtk.Menu()
             connect_item.set_submenu(self._connect_submenu)
