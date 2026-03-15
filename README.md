@@ -158,9 +158,10 @@ oneconnect status
 oneconnect status Demo
 ```
 
-Disconnect:
+Disconnect (omit profile to disconnect all connected profiles):
 
 ```bash
+oneconnect disconnect
 oneconnect disconnect Demo
 ```
 

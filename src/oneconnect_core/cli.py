@@ -32,7 +32,7 @@ def main() -> None:
     connect.set_defaults(use_nm=None)
 
     disconnect = sub.add_parser("disconnect")
-    disconnect.add_argument("name")
+    disconnect.add_argument("name", nargs="?", default=None, help="Profile name to disconnect; if omitted, disconnect all connected profiles (direct backend)")
     disconnect.add_argument("--no-pkexec", action="store_true", help="Run disconnect directly without pkexec")
     disconnect.add_argument("--nm", "--network-manager", dest="use_nm", action="store_true", help="Use NetworkManager to disconnect")
     disconnect.add_argument("--no-nm", dest="use_nm", action="store_false", help="Disconnect direct openconnect (default)")
@@ -65,17 +65,28 @@ def main() -> None:
         return
 
     if args.cmd == "disconnect":
-        profile = store.get_by_name(args.name)
-        if not profile:
-            raise SystemExit(f"Profile not found: {args.name}")
         use_nm = args.use_nm if args.use_nm is not None else get_use_networkmanager()
         backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
 
-        async def run_disconnect() -> None:
-            rc = await backend.disconnect(profile, root_pid=None, log=print)
-            raise SystemExit(rc)
-        asyncio.run(run_disconnect())
-        return
+        async def run_disconnect() -> int:
+            if args.name is not None:
+                profile = store.get_by_name(args.name)
+                if not profile:
+                    raise SystemExit(f"Profile not found: {args.name}")
+                return await backend.disconnect(profile, root_pid=None, log=print)
+            # No name: disconnect all connected profiles (direct backend only; we detect by pid file)
+            data = store.load()
+            last_rc = 0
+            for p in data.profiles:
+                if get_tunnel_status(p) is None:
+                    continue
+                rc = await backend.disconnect(p, root_pid=None, log=print)
+                if rc != 0:
+                    last_rc = rc
+            return last_rc
+
+        rc = asyncio.run(run_disconnect())
+        raise SystemExit(rc)
 
     if args.cmd == "status":
         if args.name is not None:
