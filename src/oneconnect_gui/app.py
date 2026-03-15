@@ -318,6 +318,12 @@ class TrayController:
         manage = Gtk.MenuItem(label="Manage profiles")
         manage.connect("activate", self._on_manage)
         self._menu.append(manage)
+        status_text = (
+            f"{name}: Connected, using IP {ip}" if ip else f"{name}: Connected"
+        ) if connected else "Unconnected"
+        status_item = Gtk.MenuItem(label=status_text)
+        status_item.set_sensitive(False)
+        self._menu.append(status_item)
         quit_item = Gtk.MenuItem(label="Quit")
         quit_item.connect("activate", self._on_quit)
         self._menu.append(quit_item)
@@ -449,8 +455,8 @@ class ProfileManagerWindow(Gtk.Window):
         scroll.add(self.listbox)
         box.pack_start(scroll, True, True, 0)
         hint = Gtk.Label(
-            label="Select a profile and click Connect (or double-click). If the tray icon is missing, enable "
-            "'AppIndicator and KStatusNotifierItem Support' in GNOME Extensions.",
+            label="Select a profile and click Connect. If the tray icon is missing, install "
+            "gnome-shell-extension-appindicator and enable AppIndicators (see README).",
             wrap=True,
             xalign=0,
             margin_top=8,
@@ -481,7 +487,7 @@ class ProfileManagerWindow(Gtk.Window):
         return getattr(row, "profile", None) if row else None
 
     def _on_activated(self, _lb: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
-        self._on_connect(None)
+        self._on_edit(None)
 
     def _on_connect(self, _btn: Gtk.Button | None) -> None:
         p = self._selected_profile()
@@ -567,9 +573,8 @@ def main() -> None:
         """Create indicator after main loop is running so the panel is ready (idle_add callback)."""
         tray = TrayController(store, on_show_manager=show_manager)
         tray_ref.append(tray)
-        # Always show the profile manager so the app is usable if the tray icon doesn't appear
-        # (e.g. on Ubuntu/GNOME without the AppIndicator extension)
-        GLib.idle_add(show_manager)
+        if "--manage-profiles" in sys.argv:
+            GLib.idle_add(show_manager)
         return False  # one-shot
 
     GLib.idle_add(setup_tray)
