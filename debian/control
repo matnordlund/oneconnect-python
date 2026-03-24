@@ -18,7 +18,7 @@ Depends:
  ${misc:Depends},
  ${python3:Depends},
  openconnect,
- policykit-1,
+ pkexec | polkitd,
  python3-aiohttp,
  python3-cryptography,
  python3-jwt

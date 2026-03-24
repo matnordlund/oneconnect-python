@@ -253,6 +253,13 @@ An example user-level autostart file is included and packaged as documentation:
 
 - `oneconnect-gui-autostart.desktop`
 
+When installing built `.deb` files manually, use `apt` (not `dpkg`) so
+dependencies are resolved automatically:
+
+```bash
+sudo apt install ./oneconnect_0.1.0-1_all.deb ./oneconnect-gui_0.1.0-1_all.deb
+```
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

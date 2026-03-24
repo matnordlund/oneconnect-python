@@ -54,6 +54,13 @@ oneconnect --help
 oneconnect-gui --manage-profiles
 ```
 
+Important:
+
+- Prefer `apt install ./package.deb` over `dpkg -i package.deb`. `apt` resolves
+  dependencies automatically; `dpkg` does not.
+- On modern Ubuntu, the old `policykit-1` package name is obsolete; `pkexec`
+  / `polkitd` are used instead.
+
 ## Distribution options
 
 ### 1) Publish release artifacts
