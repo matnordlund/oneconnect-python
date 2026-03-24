@@ -1,0 +1,49 @@
+Source: oneconnect-linux
+Section: net
+Priority: optional
+Maintainer: Mattias Nordlund <mattias@example.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-setuptools
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/matnordlund/oneconnect-python
+
+Package: oneconnect
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ openconnect,
+ policykit-1,
+ python3-aiohttp,
+ python3-cryptography,
+ python3-jwt
+Description: Clavister NetWall OIDC + OpenConnect CLI helper
+ OneConnect provides a CLI to authenticate through Clavister NetWall OIDC
+ and launch OpenConnect with process control helpers.
+ .
+ This package installs the CLI command:
+  - oneconnect
+
+Package: oneconnect-gui
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ gir1.2-ayatanaappindicator3-0.1,
+ gir1.2-gtk-3.0,
+ python3-gi,
+ oneconnect (= ${binary:Version})
+Recommends:
+ gnome-shell-extension-appindicator
+Description: Systray GUI for OneConnect (GTK3 + AppIndicator)
+ OneConnect GUI provides a system-tray VPN launcher and profile manager
+ for Clavister NetWall + OpenConnect workflows.
+ .
+ On GNOME desktops, AppIndicator support must be enabled for tray icons.
+ The profile manager can always be opened with:
+  oneconnect-gui --manage-profiles

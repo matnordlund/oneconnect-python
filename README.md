@@ -238,6 +238,21 @@ When using the NetworkManager backend:
 - This starter has been improved based on live Debian testing, but it is still a starter project rather than a packaged product.
 - NetworkManager integration is implemented as an optional, experimental backend (CLI `--nm`, config/env); it is mostly broken on many setups—use direct OpenConnect for reliability.
 
+## Debian package builds
+
+This repository now includes native Debian packaging metadata under `debian/` that builds two packages:
+
+- `oneconnect` (CLI)
+- `oneconnect-gui` (tray/profile manager)
+
+For full build, multi-arch, and distribution instructions, see:
+
+- [docs/DEB-PACKAGING.md](docs/DEB-PACKAGING.md)
+
+An example user-level autostart file is included and packaged as documentation:
+
+- `oneconnect-gui-autostart.desktop`
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

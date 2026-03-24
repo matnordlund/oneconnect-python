@@ -1,0 +1,28 @@
+oneconnect-gui for Debian/Ubuntu
+===============================
+
+Autostart policy
+----------------
+
+This package does not force GUI autostart globally for all users.
+
+An example autostart desktop file is installed at:
+
+  /usr/share/doc/oneconnect-gui/examples/oneconnect-gui-autostart.desktop
+
+Users can enable autostart per account with:
+
+  mkdir -p ~/.config/autostart
+  cp /usr/share/doc/oneconnect-gui/examples/oneconnect-gui-autostart.desktop \
+     ~/.config/autostart/oneconnect-gui.desktop
+
+If oneconnect-gui is not on PATH for your session, edit Exec= to an absolute path.
+
+GNOME tray support
+------------------
+
+For GNOME-based desktops, install/enable AppIndicator support:
+
+  sudo apt install gnome-shell-extension-appindicator
+
+Then enable "AppIndicator and KStatusNotifierItem Support" in the Extensions app.

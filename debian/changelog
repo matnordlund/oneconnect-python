@@ -1,0 +1,6 @@
+oneconnect-linux (0.1.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging.
+  * Split packages into oneconnect (CLI) and oneconnect-gui (tray GUI).
+
+ -- Mattias Nordlund <mattias@example.com>  Thu, 14 Mar 2026 12:00:00 +0000

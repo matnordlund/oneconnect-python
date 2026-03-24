@@ -1,0 +1,49 @@
+name: Build DEB Packages
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            debhelper \
+            dh-python \
+            pybuild-plugin-pyproject \
+            python3-all \
+            python3-setuptools \
+            devscripts \
+            dpkg-dev
+
+      - name: Build .deb packages
+        run: |
+          dpkg-buildpackage -us -uc -b
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp -v ../*.deb artifacts/ || true
+          cp -v ../*.changes artifacts/ || true
+          cp -v ../*.buildinfo artifacts/ || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.runner }}
+          path: artifacts/
