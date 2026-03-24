@@ -1,23 +1,23 @@
 #!/usr/bin/make -f
 
 export PYBUILD_NAME=oneconnect-linux
-export PYBUILD_DESTDIR=debian/tmp
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_auto_install:
-	dh_auto_install --destdir=debian/tmp
+	# Install Python payload directly into the oneconnect binary package dir.
+	dh_auto_install --destdir=debian/oneconnect
 	# Some pyproject installer environments place files under /usr/local in destdir.
-	# Normalize to /usr so dh_install patterns remain stable.
-	if [ -d debian/tmp/usr/local/bin ]; then \
-		mkdir -p debian/tmp/usr/bin; \
-		mv debian/tmp/usr/local/bin/* debian/tmp/usr/bin/ || true; \
+	# Normalize to /usr so runtime paths are consistent.
+	if [ -d debian/oneconnect/usr/local/bin ]; then \
+		mkdir -p debian/oneconnect/usr/bin; \
+		mv debian/oneconnect/usr/local/bin/* debian/oneconnect/usr/bin/ || true; \
 	fi
-	if [ -d debian/tmp/usr/local/lib ]; then \
-		mkdir -p debian/tmp/usr/lib; \
-		mv debian/tmp/usr/local/lib/* debian/tmp/usr/lib/ || true; \
+	if [ -d debian/oneconnect/usr/local/lib ]; then \
+		mkdir -p debian/oneconnect/usr/lib; \
+		mv debian/oneconnect/usr/local/lib/* debian/oneconnect/usr/lib/ || true; \
 	fi
-	if [ -d debian/tmp/usr/local ]; then \
-		rmdir --ignore-fail-on-non-empty debian/tmp/usr/local/bin debian/tmp/usr/local/lib debian/tmp/usr/local || true; \
+	if [ -d debian/oneconnect/usr/local ]; then \
+		rmdir --ignore-fail-on-non-empty debian/oneconnect/usr/local/bin debian/oneconnect/usr/local/lib debian/oneconnect/usr/local || true; \
 	fi
