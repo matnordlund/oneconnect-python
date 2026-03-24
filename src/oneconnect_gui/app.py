@@ -151,8 +151,18 @@ class LogViewerWindow(Gtk.Window):
         self._proc: subprocess.Popen | None = None
         self._watch_id: int | None = None
 
-        # Terminal-like styling
-        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0.15, 0.15, 0.15, 1.0))
+        # Terminal-like styling (force dark theme regardless of system theme)
+        css = Gtk.CssProvider()
+        css.load_from_data(
+            b"""
+            textview.log-terminal,
+            textview.log-terminal text {
+                background-color: #000000;
+                color: #d9d9d9;
+                caret-color: #d9d9d9;
+            }
+            """
+        )
         scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
             vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
@@ -166,7 +176,10 @@ class LogViewerWindow(Gtk.Window):
             top_margin=8,
             bottom_margin=8,
         )
-        self._text.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0.9, 0.9, 0.9, 1.0))
+        self._text.get_style_context().add_class("log-terminal")
+        self._text.get_style_context().add_provider(
+            css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
         fd = Pango.FontDescription.from_string("Monospace 10")
         self._text.override_font(fd)
         self._buffer = self._text.get_buffer()

@@ -1,3 +1,9 @@
+oneconnect-linux (0.1.1-1) unstable; urgency=medium
+
+  * Bump upstream version to 0.1.1.
+
+ -- Mattias Nordlund <mattias@example.com>  Thu, 14 Mar 2026 12:30:00 +0000
+
 oneconnect-linux (0.1.0-1) unstable; urgency=medium
 
   * Initial Debian packaging.
