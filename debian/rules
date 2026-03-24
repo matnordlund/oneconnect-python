@@ -5,3 +5,19 @@ export PYBUILD_DESTDIR=debian/tmp
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/tmp
+	# Some pyproject installer environments place files under /usr/local in destdir.
+	# Normalize to /usr so dh_install patterns remain stable.
+	if [ -d debian/tmp/usr/local/bin ]; then \
+		mkdir -p debian/tmp/usr/bin; \
+		mv debian/tmp/usr/local/bin/* debian/tmp/usr/bin/ || true; \
+	fi
+	if [ -d debian/tmp/usr/local/lib ]; then \
+		mkdir -p debian/tmp/usr; \
+		mv debian/tmp/usr/local/lib/* debian/tmp/usr/lib/ || true; \
+	fi
+	if [ -d debian/tmp/usr/local ]; then \
+		rmdir --ignore-fail-on-non-empty debian/tmp/usr/local/bin debian/tmp/usr/local/lib debian/tmp/usr/local || true; \
+	fi
