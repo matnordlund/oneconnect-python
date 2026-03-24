@@ -1,6 +1,7 @@
 #!/usr/bin/make -f
 
 export PYBUILD_NAME=oneconnect-linux
+export PYBUILD_DESTDIR=debian/tmp
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild

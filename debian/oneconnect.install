@@ -1,3 +1,5 @@
 usr/bin/oneconnect
-usr/lib/python3*/dist-packages/oneconnect_core/
-usr/lib/python3*/dist-packages/oneconnect_linux-*.dist-info/
+usr/bin/oneconnect-gui
+usr/lib/python3*/dist-packages/oneconnect_core*
+usr/lib/python3*/dist-packages/oneconnect_gui*
+usr/lib/python3*/dist-packages/oneconnect_linux-*.dist-info*
