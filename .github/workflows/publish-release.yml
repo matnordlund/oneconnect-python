@@ -1,0 +1,141 @@
+name: Publish Release From DEB Artifacts
+
+on:
+  # Run only after the DEB build workflow has completed.
+  workflow_run:
+    workflows:
+      # Current workflow name in this repository.
+      - Build DEB Packages
+      # Keep compatibility if the workflow is renamed to "deb-build".
+      - deb-build
+    types: [completed]
+
+# Minimal permissions:
+# - actions:read is required to list/download artifacts from the triggering run.
+# - contents:write is required to create/update tags/releases and upload assets.
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    # Only continue for successful runs from this same repository.
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out the exact commit from triggering run
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Prepare dist directory
+        run: mkdir -p dist
+
+      - name: Download all artifacts from triggering workflow run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Query artifacts for the workflow_run id and download each zip.
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" > artifacts.json
+
+          artifact_count="$(jq -r '.total_count // 0' artifacts.json)"
+          echo "Found artifacts: ${artifact_count}"
+          if [ "${artifact_count}" = "0" ]; then
+            echo "No artifacts found on triggering run; nothing to publish."
+            exit 0
+          fi
+
+          jq -r '.artifacts[] | [.id, .name, .archive_download_url] | @tsv' artifacts.json \
+            | while IFS=$'\t' read -r id name url; do
+                echo "Downloading artifact ${name} (${id})"
+                zip_path="dist/${name}.zip"
+                gh api -H "Accept: application/vnd.github+json" "${url}" > "${zip_path}"
+                mkdir -p "dist/${name}"
+                unzip -o -q "${zip_path}" -d "dist/${name}"
+              done
+
+      - name: Collect publishable files
+        id: files
+        run: |
+          set -euo pipefail
+          # Keep typical Debian outputs only.
+          mapfile -t publish_files < <(find dist -type f \
+            \( -name '*.deb' -o -name '*.ddeb' -o -name '*.changes' -o -name '*.buildinfo' -o -name '*.tar.*' \) \
+            | sort)
+
+          if [ "${#publish_files[@]}" -eq 0 ]; then
+            echo "publishable=false" >> "$GITHUB_OUTPUT"
+            echo "No publishable Debian artifacts found."
+            exit 0
+          fi
+
+          printf "%s\n" "${publish_files[@]}" > dist/publish-files.txt
+          echo "publishable=true" >> "$GITHUB_OUTPUT"
+          echo "count=${#publish_files[@]}" >> "$GITHUB_OUTPUT"
+          echo "Publishable artifact count: ${#publish_files[@]}"
+
+      - name: Extract version from debian/changelog
+        id: version
+        if: steps.files.outputs.publishable == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f debian/changelog ]; then
+            echo "debian/changelog not found; cannot determine version." >&2
+            exit 1
+          fi
+
+          first_line="$(head -n 1 debian/changelog)"
+          # Example: oneconnect-linux (0.1.1-1) unstable; urgency=medium
+          full_version="$(sed -n 's/^[^(]*(\([^)]*\)).*/\1/p' <<< "${first_line}")"
+          if [ -z "${full_version}" ]; then
+            echo "Failed to parse package version from debian/changelog: ${first_line}" >&2
+            exit 1
+          fi
+
+          upstream_version="${full_version%%-*}"
+          if [ -z "${upstream_version}" ]; then
+            echo "Failed to parse upstream version from package version: ${full_version}" >&2
+            exit 1
+          fi
+
+          tag="v${upstream_version}"
+          echo "full_version=${full_version}" >> "$GITHUB_OUTPUT"
+          echo "upstream_version=${upstream_version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Using release tag: ${tag}"
+
+      - name: Create or update GitHub Release
+        if: steps.files.outputs.publishable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; will update assets."
+          else
+            gh release create "${TAG}" \
+              --target "${SHA}" \
+              --title "${TAG}" \
+              --notes "Automated release from successful DEB build artifacts."
+          fi
+
+      - name: Upload assets to release (idempotent, replace-by-name)
+        if: steps.files.outputs.publishable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            echo "Uploading ${file}"
+            gh release upload "${TAG}" "${file}" --clobber
+          done < dist/publish-files.txt

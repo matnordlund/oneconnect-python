@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import os
 import subprocess
 import sys
@@ -67,6 +68,59 @@ TRAY_ICON_SIZE = 22
 GREEN_TINT = (0x2e, 0xcc, 0x71)  # Yaru success-style green
 
 _connected_icon_path: str | None = None
+_glib_log_handler_ref = None
+
+
+def _suppress_ayatana_deprecation_warning() -> None:
+    """
+    Suppress noisy libayatana-appindicator deprecation warning at startup.
+    This app still relies on the GTK3 AppIndicator API for tray support.
+    """
+    global _glib_log_handler_ref
+    try:
+        libglib = ctypes.CDLL("libglib-2.0.so.0")
+    except OSError:
+        return
+
+    # GLib log levels
+    G_LOG_LEVEL_WARNING = 1 << 4
+
+    LOGFUNC = ctypes.CFUNCTYPE(
+        None,
+        ctypes.c_char_p,  # log_domain
+        ctypes.c_int,     # log_level
+        ctypes.c_char_p,  # message
+        ctypes.c_void_p,  # user_data
+    )
+
+    @LOGFUNC
+    def _log_handler(domain, level, message, user_data):  # pragma: no cover
+        # Drop only the specific deprecation line from libayatana-appindicator.
+        try:
+            d = domain.decode("utf-8", errors="ignore") if domain else ""
+            m = message.decode("utf-8", errors="ignore") if message else ""
+        except Exception:
+            return
+        if d == "libayatana-appindicator" and "deprecated" in m and "appindicator-glib" in m:
+            return
+
+    _glib_log_handler_ref = _log_handler
+    try:
+        libglib.g_log_set_handler.argtypes = [
+            ctypes.c_char_p,  # log_domain
+            ctypes.c_int,     # log_levels
+            LOGFUNC,          # log_func
+            ctypes.c_void_p,  # user_data
+        ]
+        libglib.g_log_set_handler.restype = ctypes.c_uint
+        libglib.g_log_set_handler(
+            b"libayatana-appindicator",
+            G_LOG_LEVEL_WARNING,
+            _glib_log_handler_ref,
+            None,
+        )
+    except Exception:
+        return
 
 
 def _green_tinted_icon_path() -> str | None:
@@ -565,6 +619,7 @@ class ProfileManagerWindow(Gtk.Window):
 def main() -> None:
     if not Gtk.init_check():
         raise SystemExit("Could not initialize GTK. Is DISPLAY set? Run from a graphical session.")
+    _suppress_ayatana_deprecation_warning()
     store = ProfileStore()
     manager_ref: list = []
     tray_ref: list = []
