@@ -1,1 +1,3 @@
+usr/bin/oneconnect-gui
+usr/lib/python3*/dist-packages/oneconnect_gui/
 oneconnect-gui-autostart.desktop usr/share/doc/oneconnect-gui/examples/

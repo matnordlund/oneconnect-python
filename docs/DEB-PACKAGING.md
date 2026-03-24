@@ -36,6 +36,11 @@ Artifacts are written in the parent directory, for example:
 - `../oneconnect-gui_*_all.deb`
 - `../oneconnect-linux_*_amd64.buildinfo` (or arm64 depending on host)
 
+Installed command locations after package install:
+
+- `/usr/bin/oneconnect` (from `oneconnect`)
+- `/usr/bin/oneconnect-gui` (from `oneconnect-gui`)
+
 ## Build for amd64 and arm64
 
 Because this is architecture-independent Python code, package binaries are `Architecture: all`.
