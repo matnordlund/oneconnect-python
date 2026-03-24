@@ -15,7 +15,7 @@ override_dh_auto_install:
 		mv debian/tmp/usr/local/bin/* debian/tmp/usr/bin/ || true; \
 	fi
 	if [ -d debian/tmp/usr/local/lib ]; then \
-		mkdir -p debian/tmp/usr; \
+		mkdir -p debian/tmp/usr/lib; \
 		mv debian/tmp/usr/local/lib/* debian/tmp/usr/lib/ || true; \
 	fi
 	if [ -d debian/tmp/usr/local ]; then \
