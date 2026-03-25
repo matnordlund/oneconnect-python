@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import aiohttp
 import os
 import subprocess
 import sys
@@ -56,7 +57,7 @@ SRC = Path(__file__).resolve().parents[1]
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from oneconnect_core.clavister import obtain_webvpn_secrets, SessionSecrets
+from oneconnect_core.clavister import ClavisterAuthError, obtain_webvpn_secrets, SessionSecrets
 from oneconnect_core.profiles import AVConfig, CONFIG_DIR, Profile, ProfileStore
 from oneconnect_core.runner import get_backend
 from oneconnect_core.openconnect_runner import get_openconnect_log_file_path, get_tunnel_status
@@ -69,6 +70,33 @@ GREEN_TINT = (0x2e, 0xcc, 0x71)  # Yaru success-style green
 
 _connected_icon_path: str | None = None
 _glib_log_handler_ref = None
+
+
+def _user_facing_connect_error(exc: Exception) -> str:
+    """Convert internal exceptions into a short message shown to the user."""
+    if isinstance(exc, aiohttp.ClientResponseError):
+        status = exc.status
+        if status == 401:
+            return "Unauthorized (401) while authenticating to NetWall. Check the profile settings and try again."
+        # Keep it short: status + message is usually enough.
+        detail = exc.message or str(exc)
+        return f"Request failed (HTTP {status}). {detail}"
+    if isinstance(exc, ClavisterAuthError):
+        return str(exc)
+    return str(exc)
+
+
+def _show_error_dialog(title: str, message: str, parent: Gtk.Window | None) -> None:
+    dlg = Gtk.MessageDialog(
+        transient_for=parent,
+        flags=0,
+        message_type=Gtk.MessageType.ERROR,
+        buttons=Gtk.ButtonsType.CLOSE,
+        text=title,
+    )
+    dlg.format_secondary_text(message)
+    dlg.run()
+    dlg.destroy()
 
 
 def _suppress_ayatana_deprecation_warning() -> None:
@@ -404,7 +432,14 @@ class TrayController:
                 backend = get_backend(use_networkmanager=False, use_pkexec=True)
                 secrets = await obtain_webvpn_secrets(profile, log=lambda m: None)
                 await backend.connect(profile, secrets, log=lambda m: None)
-            asyncio.run(do_connect())
+            try:
+                asyncio.run(do_connect())
+            except Exception as exc:
+                msg = _user_facing_connect_error(exc)
+                GLib.idle_add(_show_error_dialog, "Connection failed", msg, None)
+                GLib.idle_add(self.refresh_menu)
+                return
+
             GLib.idle_add(self.refresh_menu)
             # Refresh again after a short delay so the pid file is visible
             GLib.timeout_add(800, self.refresh_menu)
@@ -563,14 +598,22 @@ class ProfileManagerWindow(Gtk.Window):
         self.connect_btn.set_sensitive(False)
 
         def run() -> None:
-            async def do_connect() -> None:
-                backend = get_backend(use_networkmanager=False, use_pkexec=True)
-                secrets = await obtain_webvpn_secrets(p, log=lambda m: None)
-                await backend.connect(p, secrets, log=lambda m: None)
-            asyncio.run(do_connect())
-            GLib.idle_add(lambda: self.connect_btn.set_sensitive(True))
-            if self.on_refresh_tray:
-                GLib.idle_add(self.on_refresh_tray)
+            try:
+                async def do_connect() -> None:
+                    backend = get_backend(use_networkmanager=False, use_pkexec=True)
+                    secrets = await obtain_webvpn_secrets(p, log=lambda m: None)
+                    await backend.connect(p, secrets, log=lambda m: None)
+
+                asyncio.run(do_connect())
+                if self.on_refresh_tray:
+                    GLib.idle_add(self.on_refresh_tray)
+            except Exception as exc:
+                msg = _user_facing_connect_error(exc)
+                GLib.idle_add(_show_error_dialog, "Connection failed", msg, self)
+                if self.on_refresh_tray:
+                    GLib.idle_add(self.on_refresh_tray)
+            finally:
+                GLib.idle_add(lambda: self.connect_btn.set_sensitive(True))
         threading.Thread(target=run, daemon=True).start()
 
     def _on_add(self, _btn: Gtk.Button) -> None:

@@ -5,7 +5,9 @@ import argparse
 import asyncio
 import json
 
-from oneconnect_core.clavister import obtain_webvpn_cookie, obtain_webvpn_secrets, SessionSecrets
+import aiohttp
+
+from oneconnect_core.clavister import ClavisterAuthError, obtain_webvpn_cookie, obtain_webvpn_secrets, SessionSecrets
 from oneconnect_core.config import get_use_networkmanager
 from oneconnect_core.openconnect_runner import get_tunnel_status
 from oneconnect_core.profiles import AVConfig, Profile, ProfileStore
@@ -113,15 +115,31 @@ def main() -> None:
         use_nm = args.use_nm if args.use_nm is not None else get_use_networkmanager()
 
         async def run() -> None:
-            secrets: SessionSecrets = await obtain_webvpn_secrets(profile, log=print)
-            backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
-            # If NetworkManager is requested but we lack a fingerprint/connect URL,
-            # fall back to direct openconnect for reliability.
-            if use_nm and not secrets.fingerprint:
-                print("NetworkManager backend missing gateway fingerprint; falling back to direct openconnect.")
-                backend = get_backend(use_networkmanager=False, use_pkexec=not args.no_pkexec)
-            rc = await backend.connect(profile, secrets, log=print)
-            raise SystemExit(rc)
+            try:
+                secrets: SessionSecrets = await obtain_webvpn_secrets(profile, log=print)
+                backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
+                # If NetworkManager is requested but we lack a fingerprint/connect URL,
+                # fall back to direct openconnect for reliability.
+                if use_nm and not secrets.fingerprint:
+                    print(
+                        "NetworkManager backend missing gateway fingerprint; falling back to direct openconnect."
+                    )
+                    backend = get_backend(use_networkmanager=False, use_pkexec=not args.no_pkexec)
+                rc = await backend.connect(profile, secrets, log=print)
+                raise SystemExit(rc)
+            except aiohttp.ClientResponseError as exc:
+                if exc.status == 401:
+                    print("ERROR: Unauthorized (401) while authenticating to NetWall. Check credentials/profile and try again.")
+                else:
+                    msg = exc.message or str(exc)
+                    print(f"ERROR: HTTP {exc.status}. {msg}")
+                raise SystemExit(1)
+            except ClavisterAuthError as exc:
+                print(f"ERROR: {exc}")
+                raise SystemExit(1)
+            except Exception as exc:
+                print(f"ERROR: {exc}")
+                raise SystemExit(1)
         asyncio.run(run())
 
 
