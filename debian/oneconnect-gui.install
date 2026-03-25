@@ -1,1 +1,4 @@
+oneconnect-gui.desktop usr/share/applications/
 oneconnect-gui-autostart.desktop usr/share/doc/oneconnect-gui/examples/
+icons/hicolor/scalable/apps/oneconnect-gui.svg usr/share/icons/hicolor/scalable/apps/
+icons/hicolor/symbolic/apps/oneconnect-gui-symbolic.svg usr/share/icons/hicolor/symbolic/apps/

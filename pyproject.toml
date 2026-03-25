@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oneconnect-linux"
-version = "0.1.1"
+version = "0.1.2"
 description = "Clavister NetWall OIDC + OpenConnect helper with reusable core and GTK UI"
 readme = "README.md"
 requires-python = ">=3.11"

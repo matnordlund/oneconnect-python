@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OneConnect
+Comment=OneConnect VPN tray (Clavister NetWall + OpenConnect)
+Exec=oneconnect-gui
+Icon=oneconnect-gui
+Terminal=false
+StartupNotify=false
+Categories=Network;Security;
+Keywords=VPN;OpenConnect;NetWall;Clavister;oneconnect
