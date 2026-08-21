@@ -649,7 +649,11 @@ class ProfileManagerWindow(Gtk.Window):
         d.destroy()
 
     def _saved(self, profile: Profile) -> None:
-        self.store.upsert_profile(profile)
+        try:
+            self.store.upsert_profile(profile)
+        except ValueError as exc:
+            _show_error_dialog("Could not save profile", str(exc), self)
+            return
         self._fill()
         if self.on_refresh_tray:
             self.on_refresh_tray()

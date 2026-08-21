@@ -98,15 +98,23 @@ class ProfileStore:
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def upsert_profile(self, profile: Profile) -> None:
+        """Insert or update. Names must stay unique: the pid/log filenames and the
+        NM connection id derive from them."""
         data = self.load()
-        replaced = False
-        for idx, existing in enumerate(data.profiles):
-            if existing.id == profile.id:
-                data.profiles[idx] = profile
-                replaced = True
-                break
-        if not replaced:
+        same_id = next((i for i, p in enumerate(data.profiles) if p.id == profile.id), None)
+        same_name = next((i for i, p in enumerate(data.profiles) if p.name == profile.name), None)
+
+        if same_id is None and same_name is not None:
+            # Saving under an existing name updates that profile instead of adding a twin.
+            profile.id = data.profiles[same_name].id
+            same_id = same_name
+        elif same_name is not None and same_name != same_id:
+            raise ValueError(f"Another profile is already named {profile.name!r}")
+
+        if same_id is None:
             data.profiles.append(profile)
+        else:
+            data.profiles[same_id] = profile
         data.last_used_profile_id = profile.id
         self.save(data)
 
