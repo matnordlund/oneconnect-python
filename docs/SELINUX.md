@@ -3,6 +3,11 @@
 Applies to Fedora/RHEL (and derivatives) with SELinux's targeted policy —
 this isn't relevant on Debian/Ubuntu, which use AppArmor by default.
 
+This isn't always needed: on a fresh Fedora 44 Workstation install, a
+plain `connect`/`disconnect` worked with zero `vpnc_t` denials under full
+enforcing, no custom module required. Try it first — only follow the
+steps below if you actually hit a denial.
+
 Requires `audit` and `policycoreutils-python-utils` (provides `audit2allow`;
 `policycoreutils` itself provides `semodule`/`setenforce`):
 
