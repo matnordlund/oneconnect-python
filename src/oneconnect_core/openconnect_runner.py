@@ -146,6 +146,7 @@ async def disconnect_openconnect(
     log = log or (lambda msg: None)
 
     pid_to_kill: int | None = root_pid
+    path: Path | None = None
     if pid_to_kill is None and profile is not None:
         path = pid_file if pid_file is not None else get_openconnect_pid_file_path(profile)
         if path.exists():
@@ -153,11 +154,6 @@ async def disconnect_openconnect(
                 pid_to_kill = int(path.read_text().strip())
             except (ValueError, OSError):
                 pid_to_kill = None
-            if pid_to_kill is not None:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
     if pid_to_kill is not None:
         base_cmd = [_find_kill(), "-TERM", str(pid_to_kill)]
@@ -186,7 +182,15 @@ async def disconnect_openconnect(
     assert proc.stdout is not None
     async for line in proc.stdout:
         log(line.decode("utf-8", errors="replace").rstrip())
-    return await proc.wait()
+    rc = await proc.wait()
+
+    if rc == 0 and path is not None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return rc
 
 
 def _current_username() -> str:
