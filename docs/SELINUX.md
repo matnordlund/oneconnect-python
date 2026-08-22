@@ -19,10 +19,13 @@ sudo dnf install audit policycoreutils policycoreutils-python-utils
 2. Set up and verify the VPN normally while permissive — add your profile,
    connect, disconnect. Don't move on until it actually works end-to-end.
 
-3. Turn whatever got logged into an allow policy and load it:
+3. Turn whatever got logged into an allow policy and load it. Include
+   `user_avc` alongside `avc` — D-Bus-mediated denials (e.g. polkit
+   registering an authentication agent) log as `user_avc`, not `avc`, and
+   `audit2allow` will silently miss them otherwise:
 
    ```bash
-   sudo ausearch -m avc -ts recent | audit2allow -M oneconnect
+   sudo ausearch -m avc,user_avc -ts recent | audit2allow -M oneconnect
    sudo semodule -i oneconnect.pp
    ```
 
@@ -36,4 +39,5 @@ sudo dnf install audit policycoreutils policycoreutils-python-utils
    sudo setenforce 1
    ```
 
-5. If `ausearch -m avc -ts recent` shows anything new, repeat step 3.
+5. If `sudo ausearch -m avc,user_avc -ts recent` shows anything new, repeat
+   step 3 (rerunning with `-M oneconnect` extends the existing module).
