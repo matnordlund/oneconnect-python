@@ -133,7 +133,11 @@ def _shell_quote(value: str) -> str:
 
 def _build_match_pattern(profile: Profile, exe: str) -> str:
     server = profile.openconnect_server or profile.server_uri
-    return f"^{exe} {server} .*--useragent={profile.useragent} .*--os={profile.vpn_os}( |$)"
+    return (
+        f"^{re.escape(exe)} {re.escape(server)} "
+        f".*--useragent={re.escape(profile.useragent)} "
+        f".*--os={re.escape(profile.vpn_os)}( |$)"
+    )
 
 
 async def disconnect_openconnect(
