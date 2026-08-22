@@ -203,6 +203,7 @@ async def run_openconnect(
     cookie: str,
     log: Optional[Callable[[str], None]] = None,
     use_pkexec: bool = False,
+    use_setuid: bool = False,
     proc_holder: object | None = None,
 ) -> int:
     log = log or (lambda msg: None)
@@ -230,7 +231,12 @@ async def run_openconnect(
         pid_file_path = get_openconnect_pid_file_path(profile)
         base_args.append("--background")
         base_args.append(f"--pid-file={pid_file_path}")
-        base_args.append(f"--setuid={_current_username()}")
+        if use_setuid:
+            # Daemon drops to the invoking user right after connecting. Note:
+            # vpnc-script's own route/DNS teardown then loses root along with
+            # it (RTNETLINK: Operation not permitted) unless --script is also
+            # set to a privileged wrapper.
+            base_args.append(f"--setuid={_current_username()}")
 
     if use_pkexec:
         pkexec = _find_pkexec()

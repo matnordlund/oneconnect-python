@@ -27,6 +27,7 @@ def main() -> None:
     connect = sub.add_parser("connect")
     connect.add_argument("name")
     connect.add_argument("--no-pkexec", action="store_true", help="Run openconnect directly without pkexec")
+    connect.add_argument("--no-setuid", action="store_true", help="Keep the daemon root instead of dropping to the invoking user (--setuid is on by default)")
     connect.add_argument("--nm", "--network-manager", dest="use_nm", action="store_true", help="Use NetworkManager to run the VPN")
     connect.add_argument("--no-nm", dest="use_nm", action="store_false", help="Run openconnect directly (default)")
     connect.set_defaults(use_nm=None)
@@ -34,6 +35,7 @@ def main() -> None:
     disconnect = sub.add_parser("disconnect")
     disconnect.add_argument("name", nargs="?", default=None, help="Profile name to disconnect; if omitted, disconnect all connected profiles (direct backend)")
     disconnect.add_argument("--no-pkexec", action="store_true", help="Run disconnect directly without pkexec")
+    disconnect.add_argument("--no-setuid", action="store_true", help="Match a connect that used --no-setuid: the daemon stayed root, so signal it with pkexec")
     disconnect.add_argument("--nm", "--network-manager", dest="use_nm", action="store_true", help="Use NetworkManager to disconnect")
     disconnect.add_argument("--no-nm", dest="use_nm", action="store_false", help="Disconnect direct openconnect (default)")
     disconnect.set_defaults(use_nm=None)
@@ -64,7 +66,7 @@ def main() -> None:
 
     if args.cmd == "disconnect":
         use_nm = args.use_nm if args.use_nm is not None else get_use_networkmanager()
-        backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
+        backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec, use_setuid=not args.no_setuid)
 
         async def run_disconnect() -> int:
             if args.name is not None:
@@ -117,14 +119,14 @@ def main() -> None:
         async def run() -> None:
             try:
                 secrets: SessionSecrets = await obtain_webvpn_secrets(profile, log=print)
-                backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec)
+                backend = get_backend(use_networkmanager=use_nm, use_pkexec=not args.no_pkexec, use_setuid=not args.no_setuid)
                 # If NetworkManager is requested but we lack a fingerprint/connect URL,
                 # fall back to direct openconnect for reliability.
                 if use_nm and not secrets.fingerprint:
                     print(
                         "NetworkManager backend missing gateway fingerprint; falling back to direct openconnect."
                     )
-                    backend = get_backend(use_networkmanager=False, use_pkexec=not args.no_pkexec)
+                    backend = get_backend(use_networkmanager=False, use_pkexec=not args.no_pkexec, use_setuid=not args.no_setuid)
                 rc = await backend.connect(profile, secrets, log=print)
                 raise SystemExit(rc)
             except aiohttp.ClientResponseError as exc:
