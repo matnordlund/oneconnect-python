@@ -229,6 +229,11 @@ OpenConnect runtime:
 - `openconnect`
 - `pkexec` recommended
 
+**Fedora/RHEL:** SELinux's targeted policy confines `openconnect`
+(`vpnc_exec_t`) by default, so a fresh enforcing install won't work out of
+the box — see [docs/SELINUX.md](docs/SELINUX.md) to generate and load the
+missing policy.
+
 When using the NetworkManager backend:
 
 - NetworkManager with `nmcli`
