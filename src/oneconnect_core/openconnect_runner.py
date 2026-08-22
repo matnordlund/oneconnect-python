@@ -48,8 +48,12 @@ def _pid_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
-    except OSError:
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        # Process exists (e.g. still root under --no-setuid) but we can't
+        # signal it as an unprivileged caller.
+        return True
 
 
 def _parse_connected_ip_from_log(log_path: Path) -> Optional[str]:
