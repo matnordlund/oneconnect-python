@@ -102,7 +102,9 @@ async def _post_config_auth(
     auth_uri: str,
     headers: dict[str, str],
     config: ConfigAuthXml,
+    log: Optional[Callable[[str], None]] = None,
 ) -> str:
+    log = log or (lambda msg: None)
     xml_str = config.create_xml_document_string()
     body = xml_str.encode("utf-8")
     req_headers = dict(headers)
@@ -110,9 +112,15 @@ async def _post_config_auth(
         "Content-Type": "text/xml; charset=utf-8",
         "X-Pad": _x_pad_value(body),
     })
+    cookie_names = [c.key for c in session.cookie_jar]
+    log(f"POST {auth_uri} with session cookies: {cookie_names}")
     async with session.post(auth_uri, data=body, headers=req_headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        text = await resp.text()
+        if resp.status >= 400:
+            log(f"NetWall response {resp.status} headers: {dict(resp.headers)!r}")
+            log(f"NetWall response {resp.status} body: {text[:2000]!r}")
         resp.raise_for_status()
-        return await resp.text()
+        return text
 
 
 async def obtain_webvpn_secrets(
@@ -144,7 +152,7 @@ async def obtain_webvpn_secrets(
 
     async with aiohttp.ClientSession() as session:
         log("Requesting discovery endpoint and client ID from NetWall")
-        bootstrap_xml = await _post_config_auth(session, server_uri, headers, ConfigAuthXml(client_environment=client_env))
+        bootstrap_xml = await _post_config_auth(session, server_uri, headers, ConfigAuthXml(client_environment=client_env), log=log)
         try:
             parsed = ConfigAuthXml.read_xml(bootstrap_xml)
         except Exception as exc:
@@ -169,6 +177,7 @@ async def obtain_webvpn_secrets(
             auth_uri,
             headers,
             ConfigAuthXml(parameters=params, authenticator=Authenticator.OIDC),
+            log=log,
         )
 
         try:
