@@ -56,6 +56,17 @@ def _pid_running(pid: int) -> bool:
         return True
 
 
+def _can_signal(pid: int) -> bool:
+    """Return True if we have permission to signal this PID directly."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return False
+    except ProcessLookupError:
+        return True  # nothing to signal; let the kill command report it
+
+
 def _parse_connected_ip_from_log(log_path: Path) -> Optional[str]:
     """Read the log file and return the most recent 'Connected ... IP' if found."""
     if not log_path.exists():
@@ -165,6 +176,12 @@ async def disconnect_openconnect(
 
     if pid_to_kill is not None:
         base_cmd = [_find_kill(), "-TERM", str(pid_to_kill)]
+        if not use_pkexec and not _can_signal(pid_to_kill):
+            # Caller assumed no pkexec is needed (e.g. based on --setuid),
+            # but the daemon is actually owned by someone else (root under
+            # --no-setuid) - fall back to pkexec instead of silently
+            # failing to signal it.
+            use_pkexec = True
     else:
         if not profile:
             raise OpenConnectLaunchError("No active OpenConnect PID is available for disconnect")
