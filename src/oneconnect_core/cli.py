@@ -1,4 +1,4 @@
-"""CLI entry point for OneConnect (list, add-profile, connect, disconnect, status)."""
+"""CLI entry point for OneConnect (list, add-profile, delete-profile, connect, disconnect, status)."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,9 @@ def main() -> None:
     add = sub.add_parser("add-profile")
     add.add_argument("--name", required=True)
     add.add_argument("--server-uri", required=True)
+
+    delete = sub.add_parser("delete-profile")
+    delete.add_argument("name")
 
     connect = sub.add_parser("connect")
     connect.add_argument("name")
@@ -58,8 +61,19 @@ def main() -> None:
             server_uri=args.server_uri,
             av=AVConfig(),
         )
-        store.upsert_profile(profile)
+        try:
+            store.upsert_profile(profile)
+        except ValueError as exc:
+            raise SystemExit(f"ERROR: {exc}")
         print(f"Saved profile {args.name} -> {profile.server_uri}")
+        return
+
+    if args.cmd == "delete-profile":
+        profile = store.get_by_name(args.name)
+        if not profile:
+            raise SystemExit(f"Profile not found: {args.name}")
+        store.delete_profile(profile.id)
+        print(f"Deleted profile {args.name}")
         return
 
     if args.cmd == "disconnect":
