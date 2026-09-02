@@ -12,7 +12,7 @@ import aiohttp
 
 from .configauthxml import Authenticator, ClientEnvironment, ConfigAuthXml, ConfigAuthXmlParameter
 from .envinfo import build_client_environment
-from .oidc import OIDCError, start_browser_oidc_flow
+from .oidc import OIDC_BROWSER_TIMEOUT, OIDCError, start_browser_oidc_flow
 from .profiles import Profile
 from urllib.parse import urlparse
 
@@ -111,8 +111,12 @@ async def _post_config_auth(
         "X-Pad": _x_pad_value(body),
     })
     async with session.post(auth_uri, data=body, headers=req_headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-        resp.raise_for_status()
-        return await resp.text()
+        text = await resp.text()
+        if resp.status >= 400:
+            raise ClavisterAuthError(
+                f"HTTP {resp.status} from {auth_uri}: {text.strip()[:500] or '(empty response body)'}"
+            )
+        return text
 
 
 async def obtain_webvpn_secrets(
@@ -142,7 +146,10 @@ async def obtain_webvpn_secrets(
     log(f"ClientVersion={client_env.client_version}, OS={client_env.operating_system_information}, Arch={client_env.operating_system_architecture}")
     log(f"AV enabled={client_env.is_av_enabled} updated={client_env.is_av_updated}")
 
-    async with aiohttp.ClientSession() as session:
+    # NetWall binds the pending auth to this connection, so it must outlive the browser
+    # sign-in; aiohttp's 15s default drops it and /auth then 401s.
+    connector = aiohttp.TCPConnector(keepalive_timeout=OIDC_BROWSER_TIMEOUT + 60)
+    async with aiohttp.ClientSession(connector=connector) as session:
         log("Requesting discovery endpoint and client ID from NetWall")
         bootstrap_xml = await _post_config_auth(session, server_uri, headers, ConfigAuthXml(client_environment=client_env))
         try:
@@ -180,8 +187,9 @@ async def obtain_webvpn_secrets(
             raise ClavisterAuthError("NetWall did not return a session token")
 
         log("Issuing CONNECT request to finalize tunnel bootstrap")
-        async with session.request("CONNECT", connect_uri, headers=headers, timeout=aiohttp.ClientTimeout(total=15)):
-            pass
+        async with session.request("CONNECT", connect_uri, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status >= 400:
+                log(f"Warning: CONNECT returned HTTP {resp.status}")
 
         cookie = f"webvpn={token_reply.session_token}"
 

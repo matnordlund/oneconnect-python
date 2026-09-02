@@ -123,7 +123,7 @@ async def discover_provider(session: aiohttp.ClientSession, discovery_endpoint: 
 
 
 # Max time to wait for user to complete browser OIDC flow (seconds).
-_OIDC_BROWSER_TIMEOUT = 600
+OIDC_BROWSER_TIMEOUT = 600
 
 
 async def start_browser_oidc_flow(session: aiohttp.ClientSession, discovery_endpoint: str, client_id: str, nonce: str | None = None) -> OIDCResult:
@@ -233,7 +233,7 @@ async def start_browser_oidc_flow(session: aiohttp.ClientSession, discovery_endp
             await asyncio.sleep(0.05)
 
     try:
-        await asyncio.wait_for(wait_for_result(), timeout=_OIDC_BROWSER_TIMEOUT)
+        await asyncio.wait_for(wait_for_result(), timeout=OIDC_BROWSER_TIMEOUT)
         if "error" in result_holder:
             raise OIDCError(result_holder["error"])
         return OIDCResult(
