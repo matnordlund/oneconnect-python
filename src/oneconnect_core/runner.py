@@ -33,8 +33,9 @@ class ConnectionBackend(Protocol):
 class DirectBackend:
     """Run openconnect as a subprocess (current behavior)."""
 
-    def __init__(self, use_pkexec: bool = True) -> None:
+    def __init__(self, use_pkexec: bool = True, use_setuid: bool = False) -> None:
         self.use_pkexec = use_pkexec
+        self.use_setuid = use_setuid
 
     async def connect(
         self,
@@ -49,6 +50,7 @@ class DirectBackend:
             secrets.cookie,
             log=log,
             use_pkexec=self.use_pkexec,
+            use_setuid=self.use_setuid,
             proc_holder=proc_holder,
         )
 
@@ -59,12 +61,14 @@ class DirectBackend:
         log: Optional[Callable[[str], None]] = None,
     ) -> int:
         from .openconnect_runner import disconnect_openconnect
-        # Daemon runs as the invoking user (--setuid), so no pkexec needed to kill it
+        # With --setuid, the daemon already runs as the invoking user, so no
+        # pkexec is needed to signal it. Otherwise it stays root and needs
+        # pkexec for the same reason it was started with pkexec.
         return await disconnect_openconnect(
             root_pid,
             profile=profile,
             log=log,
-            use_pkexec=False,
+            use_pkexec=False if self.use_setuid else self.use_pkexec,
         )
 
 
@@ -91,8 +95,8 @@ class NetworkManagerBackend:
         return await deactivate_nm_connection(profile, log=log)
 
 
-def get_backend(use_networkmanager: bool, use_pkexec: bool = True) -> ConnectionBackend:
+def get_backend(use_networkmanager: bool, use_pkexec: bool = True, use_setuid: bool = False) -> ConnectionBackend:
     """Return the appropriate backend."""
     if use_networkmanager:
         return NetworkManagerBackend()
-    return DirectBackend(use_pkexec=use_pkexec)
+    return DirectBackend(use_pkexec=use_pkexec, use_setuid=use_setuid)

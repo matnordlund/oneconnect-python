@@ -48,8 +48,23 @@ def _pid_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
-    except OSError:
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        # Process exists (e.g. still root under --no-setuid) but we can't
+        # signal it as an unprivileged caller.
+        return True
+
+
+def _can_signal(pid: int) -> bool:
+    """Return True if we have permission to signal this PID directly."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return False
+    except ProcessLookupError:
+        return True  # nothing to signal; let the kill command report it
 
 
 def _parse_connected_ip_from_log(log_path: Path) -> Optional[str]:
@@ -161,6 +176,12 @@ async def disconnect_openconnect(
 
     if pid_to_kill is not None:
         base_cmd = [_find_kill(), "-TERM", str(pid_to_kill)]
+        if not use_pkexec and not _can_signal(pid_to_kill):
+            # Caller assumed no pkexec is needed (e.g. based on --setuid),
+            # but the daemon is actually owned by someone else (root under
+            # --no-setuid) - fall back to pkexec instead of silently
+            # failing to signal it.
+            use_pkexec = True
     else:
         if not profile:
             raise OpenConnectLaunchError("No active OpenConnect PID is available for disconnect")
@@ -211,6 +232,7 @@ async def run_openconnect(
     cookie: str,
     log: Optional[Callable[[str], None]] = None,
     use_pkexec: bool = False,
+    use_setuid: bool = False,
     proc_holder: object | None = None,
 ) -> int:
     log = log or (lambda msg: None)
@@ -238,7 +260,12 @@ async def run_openconnect(
         pid_file_path = get_openconnect_pid_file_path(profile)
         base_args.append("--background")
         base_args.append(f"--pid-file={pid_file_path}")
-        base_args.append(f"--setuid={_current_username()}")
+        if use_setuid:
+            # Daemon drops to the invoking user right after connecting. Note:
+            # vpnc-script's own route/DNS teardown then loses root along with
+            # it (RTNETLINK: Operation not permitted) unless --script is also
+            # set to a privileged wrapper.
+            base_args.append(f"--setuid={_current_username()}")
 
     if use_pkexec:
         pkexec = _find_pkexec()
