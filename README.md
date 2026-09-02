@@ -21,6 +21,25 @@ Then run the CLI or GUI with the venv active:
 
 To leave the venv: `deactivate`. To use the app again later: `cd oneconnect-python && source .venv/bin/activate`, then `oneconnect` or `oneconnect-gui`.
 
+**Fedora/RHEL (CLI):** `python3 -m venv` works out of the box (no separate
+`python3-venv` package needed), and `pip install -e .` succeeds with pip's
+default build isolation — the build-isolation workarounds below are a
+Debian/Ubuntu-specific issue and shouldn't be needed here. Install the
+system prerequisites first:
+
+```bash
+sudo dnf install python3 python3-pip git openconnect polkit
+git clone https://github.com/matnordlund/oneconnect-python.git
+cd oneconnect-python
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+If SELinux is enforcing (the default on Fedora/RHEL), see
+[docs/SELINUX.md](docs/SELINUX.md) — `openconnect` runs in a confined
+domain and needs a policy module before `connect`/`disconnect` will work.
+
 **From source without venv** (when your system allows it):
 
 ```bash
@@ -228,6 +247,11 @@ OpenConnect runtime:
 
 - `openconnect`
 - `pkexec` recommended
+
+**Fedora/RHEL:** SELinux's targeted policy confines `openconnect`
+(`vpnc_exec_t`) by default, so a fresh enforcing install won't work out of
+the box — see [docs/SELINUX.md](docs/SELINUX.md) to generate and load the
+missing policy.
 
 When using the NetworkManager backend:
 
