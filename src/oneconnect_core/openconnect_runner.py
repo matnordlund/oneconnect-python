@@ -155,6 +155,20 @@ def _build_match_pattern(profile: Profile, exe: str) -> str:
     )
 
 
+def _pid_matches_profile(pid: int, profile: Profile, exe: str) -> bool:
+    """True if /proc/<pid>/cmdline is the openconnect daemon for this profile.
+
+    Guards against a stale pid file whose PID has been reused by an unrelated
+    process. Same pattern as the pkill fallback, so both paths agree.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    cmdline = raw.rstrip(b"\0").decode("utf-8", errors="replace").replace("\0", " ")
+    return re.match(_build_match_pattern(profile, exe), cmdline) is not None
+
+
 async def disconnect_openconnect(
     root_pid: int | None,
     profile: Profile | None = None,
@@ -173,6 +187,10 @@ async def disconnect_openconnect(
                 pid_to_kill = int(path.read_text().strip())
             except (ValueError, OSError):
                 pid_to_kill = None
+        exe = _find_openconnect()
+        if pid_to_kill is not None and exe and not _pid_matches_profile(pid_to_kill, profile, exe):
+            log(f"Stale pid file {path}: PID {pid_to_kill} is not openconnect for this profile; matching by command line instead")
+            pid_to_kill = None
 
     if pid_to_kill is not None:
         base_cmd = [_find_kill(), "-TERM", str(pid_to_kill)]
